@@ -1,9 +1,10 @@
 import { cn } from "@/lib/utils";
 
 const SUGGESTED_PROMPTS = [
-  "What can you help me with?",
-  "What tools are available?",
-  "How does this work?",
+  "What is the gender breakdown across all images?",
+  "Which countries produce the most stock photos?",
+  "How are ethnicities distributed across different topics?",
+  "What are the most common body poses?",
 ];
 
 type SuggestedPromptProps = {
