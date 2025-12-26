@@ -6,25 +6,15 @@ Analytics backend and AI-powered query interface for Michael Mandiberg's [Taking
 
 This project migrates the Taking Stock database from MySQL/MongoDB to ClickHouse for fast analytical queries over **tens of millions of stock photos**. It provides an AI-queryable interface via MCP (Model Context Protocol) and a web chat UI for natural language data exploration.
 
+The MooseStack service runs ClickHouse and exposes an MCP server. The web app provides a chat interface where users ask questions in natural language, Claude generates SQL queries via MCP tools, and results are returned for display.
+
 ### Architecture
 
 This is a pnpm monorepo with two packages:
 
-### `packages/moosestack-service/`
+**`packages/moosestack-service/`** — ClickHouse-backed data service with MCP server. Handles data ingestion and exposes query tools via API at `http://localhost:4000`.
 
-ClickHouse-backed data service with MCP server:
-
-- Data ingestion pipelines for images, encodings, demographics, and clustering results
-- MCP server exposing `query_clickhouse` and `get_data_catalog` tools
-- API at `http://localhost:4000`
-
-### `packages/web-app/`
-
-Next.js chat interface for AI-powered data exploration:
-
-- Natural language queries over the stock photo dataset
-- Connects to MooseStack MCP server
-- Uses Anthropic Claude for query generation
+**`packages/web-app/`** — Next.js chat interface for AI-powered data exploration. Connects to MooseStack MCP server and uses Anthropic Claude for query generation.
 
 ## Getting Started
 
@@ -69,133 +59,18 @@ pnpm dev:web      # Start web app only
 
 ## MCP Tools Available
 
-### `query_clickhouse`
-
-Executes SQL queries against the ClickHouse database with security validation and automatic result limiting. The tool automatically uses the current database context via `currentDatabase()` function.
-
-**Input Parameters:**
-
-- `query` (required): SQL query to execute against ClickHouse (must be SELECT, SHOW, DESCRIBE, or EXPLAIN)
-- `limit` (optional): Maximum number of rows to return (default: 100, max: 1000)
-
-**Output:**
-
-- `rows`: Array of row objects containing query results
-- `rowCount`: Number of rows returned
-
-**Security:**
-
-- Only read-only queries are allowed (SELECT, SHOW, DESCRIBE, EXPLAIN)
-- Write operations (INSERT, UPDATE, DELETE) are blocked
-- DDL operations (DROP, CREATE, ALTER, TRUNCATE) are blocked
-- Results are automatically limited to maximum 1000 rows
-- Enforces ClickHouse readonly mode at database level
-
-### `get_data_catalog`
-
-Discovers available tables and materialized views in the ClickHouse database with their schema information. Useful for AI assistants to learn what data exists before writing queries.
-
-**Input Parameters:**
-
-- `component_type` (optional): Filter by component type - `"tables"` for regular tables or `"materialized_views"` for pre-aggregated views
-- `search` (optional): Regex pattern to search for in component names
-- `format` (optional): Output format - `"summary"` (default) shows names and column counts, `"detailed"` shows full schemas with column types
-
-**Output:**
-
-- `catalog`: Formatted catalog information showing tables/views with their columns
-
-**Database Context:**
-
-All tools use `currentDatabase()` to automatically query the active database context, eliminating the need for database name configuration.
-
-## Using with Claude Code
-
-You can configure Claude Code to connect to your MCP server by adding it to your Claude Code configuration:
-
-```bash
-claude mcp add --transport http clickhouse http://localhost:4000/tools
-```
-
-Once connected, you can ask Claude Code questions like:
-
-- "What tables exist in the database?"
-- "How many images are there by gender?"
-- "Show me the distribution of images by country"
-- "What are the top 10 topics by image count?"
-
-Claude Code will automatically use the `query_clickhouse` tool to execute the appropriate SQL queries.
-
-## Security Features
-
-The MCP server implements several security measures for safe database querying:
-
-### ✅ Implemented
-
-- **Readonly SQL Queries**: enforced by the ClickHouse client
-- **Row Limiting**: Results are capped at a default of 100 rows, but this limit can be configured up to a maximum of 1000 rows to prevent excessive data transfer
-- **Error Handling**: Security errors returned through MCP protocol without exposing internals
-
-### ⚠️ Production Considerations
-
-Before deploying to production, consider adding:
-
-- **Authentication & Authorization**: API key authentication is available (see above)
-- **Rate Limiting**: Protect against abuse and DoS attacks
-- **Query Timeouts**: Prevent long-running queries from consuming resources
-- **Audit Logging**: Track who executed which queries and when
-- **IP Whitelisting**: Restrict access to known clients
-- **TLS/HTTPS**: Encrypt data in transit
-
-The current implementation provides a secure foundation for read-only database access but should be enhanced with additional production-grade features based on your deployment requirements.
-
-## Data Models
-
-Data models are defined in `packages/moosestack-service/app/ingest/models.ts`. Key tables include:
-
-- **Images** - Core image metadata (site, author, caption, URLs, dimensions)
-- **Encodings** - Face/body detection flags, orientation, landmark presence
-- **Demographics** - Age, Gender, Ethnicity, Location lookup tables
-- **Clusters** - Body pose, hand position, HSV color clusters at various granularities
-
-## Data Ingestion
-
-Ingest data via POST requests to `http://localhost:4000/ingest/{TableName}`. For example:
-
-```bash
-curl -X POST http://localhost:4000/ingest/Images \
-  -H "Content-Type: application/json" \
-  -d '{"image_id": 1, "site_name_id": 1, ...}'
-```
+- **`query_clickhouse`** - Execute read-only SQL queries against ClickHouse with automatic result limiting
+- **`get_data_catalog`** - Discover available tables and views with their schema information
 
 ## Learn More
 
+- [Data Migration Plan](./data-migration.md) - Strategy for migrating from MySQL/MongoDB to ClickHouse
+- [Development Guide](./development.md) - Data models and ingestion API
+- [Security](./security.md) - Security features and production considerations
 - [MooseStack Documentation](https://docs.moosejs.com)
 - [Model Context Protocol](https://modelcontextprotocol.io)
 - [MCP SDK (@modelcontextprotocol/sdk)](https://github.com/modelcontextprotocol/typescript-sdk)
 - [WebApp Class Reference](https://docs.moosejs.com/building-moose-apps/custom-apis)
-
-## Troubleshooting
-
-### Port Already in Use
-
-If port 4000 is already in use, update `packages/moosestack-service/moose.config.toml`:
-
-```toml
-[server]
-port = 4001
-```
-
-### TypeScript Errors
-
-Make sure all dependencies are installed with `pnpm install`.
-
-## How It Works
-
-1. **MooseStack service** runs the ClickHouse database and exposes an MCP server for AI-powered queries
-2. **Web app** provides a chat interface where users can ask questions in natural language
-3. Claude interprets the questions and generates SQL queries via the MCP tools
-4. Results are returned and formatted for human-readable display
 
 ---
 
