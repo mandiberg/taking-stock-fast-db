@@ -10,11 +10,13 @@ The MooseStack service runs ClickHouse and exposes an MCP server. The web app pr
 
 ### Architecture
 
-This is a pnpm monorepo with two packages:
+This is a pnpm monorepo with three packages:
 
 **`packages/moosestack-service/`** — ClickHouse-backed data service with MCP server. Handles data ingestion and exposes query tools via API at `http://localhost:4000`.
 
 **`packages/web-app/`** — Next.js chat interface for AI-powered data exploration. Connects to MooseStack MCP server and uses Anthropic Claude for query generation.
+
+**`packages/data-faker/`** — Test data generator for performance testing. Generates realistic variant data matching the `images_analytical` schema with checkpoint/resume support. See [data-faker README](./packages/data-faker/README.md) for details.
 
 ## Getting Started
 
@@ -55,7 +57,31 @@ Or start services individually:
 ```bash
 pnpm dev:moose    # Start MooseStack service only
 pnpm dev:web      # Start web app only
+pnpm dev:faker    # Run data faker (generates test data)
 ```
+
+### Data Faker
+
+The `data-faker` package generates realistic test data for performance testing. It supports checkpoint/resume, graceful shutdown, and generates ~100GB of variant data.
+
+**Quick start:**
+```bash
+# Quick test (100 rows)
+pnpm dev:faker --rows 100
+
+# Check current row count
+pnpm dev:faker --count
+
+# Full scale (100GB, ~200M rows)
+pnpm dev:faker --rows 200000000
+
+# Resume from checkpoint
+pnpm dev:faker
+```
+
+See [packages/data-faker/README.md](./packages/data-faker/README.md) for complete documentation.
+
+**Note:** The data faker requires MooseStack service to be running (or at least ClickHouse accessible) to insert data. Run `pnpm dev:moose` first if ClickHouse isn't already running.
 
 ## MCP Tools Available
 

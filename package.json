@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "pnpm --parallel --stream -r dev",
     "dev:moose": "pnpm --filter moosestack-service dev",
-    "dev:web": "pnpm --filter web-app dev"
+    "dev:web": "pnpm --filter web-app dev",
+    "dev:faker": "pnpm --filter data-faker start"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
