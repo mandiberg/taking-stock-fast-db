@@ -3,11 +3,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Tufte-inspired design system
+ * Based on "The Visual Display of Quantitative Information"
+ * - Serif typography (Crimson Pro)
+ * - Warm, muted color palette
+ * - Minimal decoration, high data-ink ratio
+ */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-serif);
+  --font-mono: var(--font-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -37,79 +45,118 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  /* Minimal border radius - Tufte prefers clean lines */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.1875rem;
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: 0.375rem;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Minimal border radius */
+  --radius: 0.25rem;
+
+  /* Warm cream background - like aged paper */
+  --background: oklch(0.98 0.008 85);
+  /* Dark brown-gray text - softer than pure black */
+  --foreground: oklch(0.22 0.02 50);
+
+  /* Cards slightly warmer than background */
+  --card: oklch(0.975 0.01 80);
+  --card-foreground: oklch(0.22 0.02 50);
+
+  --popover: oklch(0.99 0.006 85);
+  --popover-foreground: oklch(0.22 0.02 50);
+
+  /* Primary: deep sienna/brown - scholarly, warm */
+  --primary: oklch(0.35 0.08 45);
+  --primary-foreground: oklch(0.98 0.008 85);
+
+  /* Secondary: muted warm gray */
+  --secondary: oklch(0.94 0.01 80);
+  --secondary-foreground: oklch(0.30 0.03 50);
+
+  /* Muted: subtle warm tone */
+  --muted: oklch(0.95 0.008 85);
+  --muted-foreground: oklch(0.45 0.02 50);
+
+  /* Accent: subtle warm highlight */
+  --accent: oklch(0.93 0.015 75);
+  --accent-foreground: oklch(0.25 0.03 50);
+
+  /* Destructive: muted brick red */
+  --destructive: oklch(0.50 0.15 25);
+
+  /* Borders: subtle warm gray */
+  --border: oklch(0.88 0.01 80);
+  --input: oklch(0.90 0.008 85);
+  --ring: oklch(0.50 0.05 50);
+
+  /* Chart colors: Tufte-inspired muted palette */
+  --chart-1: oklch(0.45 0.12 25);   /* Muted red-brown */
+  --chart-2: oklch(0.50 0.10 230);  /* Muted blue */
+  --chart-3: oklch(0.45 0.08 145);  /* Muted green */
+  --chart-4: oklch(0.60 0.12 85);   /* Muted gold/ochre */
+  --chart-5: oklch(0.40 0.08 300);  /* Muted purple */
+
+  /* Sidebar: slightly deeper cream */
+  --sidebar: oklch(0.96 0.01 80);
+  --sidebar-foreground: oklch(0.22 0.02 50);
+  --sidebar-primary: oklch(0.35 0.08 45);
+  --sidebar-primary-foreground: oklch(0.98 0.008 85);
+  --sidebar-accent: oklch(0.93 0.012 80);
+  --sidebar-accent-foreground: oklch(0.25 0.03 50);
+  --sidebar-border: oklch(0.88 0.01 80);
+  --sidebar-ring: oklch(0.50 0.05 50);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Deep warm charcoal background */
+  --background: oklch(0.18 0.015 60);
+  /* Warm off-white text */
+  --foreground: oklch(0.92 0.01 85);
+
+  --card: oklch(0.22 0.015 55);
+  --card-foreground: oklch(0.92 0.01 85);
+
+  --popover: oklch(0.20 0.015 60);
+  --popover-foreground: oklch(0.92 0.01 85);
+
+  /* Primary: warm cream on dark */
+  --primary: oklch(0.88 0.02 80);
+  --primary-foreground: oklch(0.20 0.015 55);
+
+  --secondary: oklch(0.28 0.015 55);
+  --secondary-foreground: oklch(0.90 0.01 85);
+
+  --muted: oklch(0.26 0.012 60);
+  --muted-foreground: oklch(0.65 0.015 70);
+
+  --accent: oklch(0.30 0.02 55);
+  --accent-foreground: oklch(0.90 0.01 85);
+
+  /* Destructive: muted warm red */
+  --destructive: oklch(0.55 0.14 25);
+
+  --border: oklch(0.32 0.015 55);
+  --input: oklch(0.28 0.012 60);
+  --ring: oklch(0.55 0.03 60);
+
+  /* Chart colors: slightly brighter for dark mode visibility */
+  --chart-1: oklch(0.60 0.14 25);   /* Warm red */
+  --chart-2: oklch(0.62 0.12 230);  /* Soft blue */
+  --chart-3: oklch(0.58 0.10 145);  /* Sage green */
+  --chart-4: oklch(0.70 0.14 85);   /* Gold/amber */
+  --chart-5: oklch(0.55 0.10 300);  /* Dusty purple */
+
+  --sidebar: oklch(0.20 0.015 55);
+  --sidebar-foreground: oklch(0.92 0.01 85);
+  --sidebar-primary: oklch(0.70 0.14 85);
+  --sidebar-primary-foreground: oklch(0.18 0.015 60);
+  --sidebar-accent: oklch(0.28 0.015 55);
+  --sidebar-accent-foreground: oklch(0.90 0.01 85);
+  --sidebar-border: oklch(0.32 0.015 55);
+  --sidebar-ring: oklch(0.55 0.03 60);
 }
 
 @layer base {
@@ -118,5 +165,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Tufte-style typography defaults */
+    font-feature-settings: "kern" 1, "liga" 1, "onum" 1;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Slightly larger base font for readability */
+  html {
+    font-size: 17px;
   }
 }
