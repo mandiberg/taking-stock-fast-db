@@ -91,7 +91,8 @@ async function main() {
       if (unit === 'KB') return num / (1024 * 1024);
       return num;
     })
-    .option('-b, --batch-size <number>', `Rows per insert batch (default: ${DEFAULT_BATCH_SIZE}, minimum: ${MIN_BATCH_SIZE} for optimal performance)`, (val) => parseInt(val, 10), DEFAULT_BATCH_SIZE)
+    .option('-b, --batch-size <number>', `Rows per insert batch (default: ${DEFAULT_BATCH_SIZE}, minimum: ${MIN_BATCH_SIZE} for optimal performance. Larger batches (50k-100k) may improve throughput for large datasets)`, (val) => parseInt(val, 10), DEFAULT_BATCH_SIZE)
+    .option('--async-no-wait', 'Disable wait_for_async_insert - let ClickHouse batch inserts internally for better throughput (may reduce immediate feedback)', false)
     .option('--seed <string>', 'Random seed for reproducibility', undefined)
     .option('--start-image-id <number>', 'Starting image_id (default: from checkpoint or 1)', (val) => parseInt(val, 10))
     .option('--reset', 'Ignore existing checkpoint and start fresh', false)
@@ -139,14 +140,20 @@ async function main() {
     );
   }
 
+  // Determine wait_for_async_insert setting (default: true, unless --async-no-wait is specified)
+  const waitForAsyncInsert = !options.asyncNoWait; // Defaults to true, false if flag is present
+
   // Load or create checkpoint
   let checkpoint: CheckpointData;
   if (options.reset) {
     console.log(chalk.yellow('Resetting checkpoint (--reset flag)'));
     deleteCheckpoint();
     const seed = options.seed || Math.random().toString(36).substring(2, 15);
-    checkpoint = createInitialCheckpoint(seed, targetRows, batchSize);
+    checkpoint = createInitialCheckpoint(seed, targetRows, batchSize, waitForAsyncInsert);
     console.log(chalk.green(`Starting fresh with seed: ${seed}`));
+    if (!waitForAsyncInsert) {
+      console.log(chalk.blue('Async insert mode: ClickHouse will batch inserts internally (better throughput)'));
+    }
   } else {
     const existing = loadCheckpoint();
     if (existing) {
@@ -163,11 +170,21 @@ async function main() {
       if (options.batchSize) {
         existing.batch_size = batchSize;
       }
+      // Update wait_for_async_insert if --async-no-wait is explicitly used
+      if (options.asyncNoWait) {
+        existing.wait_for_async_insert = false;
+      } else if (existing.wait_for_async_insert === undefined) {
+        // If checkpoint doesn't have this setting, use current default (true)
+        existing.wait_for_async_insert = true;
+      }
       checkpoint = existing;
     } else {
       const seed = options.seed || Math.random().toString(36).substring(2, 15);
-      checkpoint = createInitialCheckpoint(seed, targetRows, batchSize);
+      checkpoint = createInitialCheckpoint(seed, targetRows, batchSize, waitForAsyncInsert);
       console.log(chalk.green(`Starting fresh with seed: ${seed}`));
+      if (!waitForAsyncInsert) {
+        console.log(chalk.blue('Async insert mode: ClickHouse will batch inserts internally (better throughput)'));
+      }
     }
   }
 

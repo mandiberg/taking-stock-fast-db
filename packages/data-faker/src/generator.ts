@@ -199,6 +199,8 @@ async function getClickHouseClient() {
       username: 'panda',
       password: 'pandapass',
       database: 'local',
+      request_timeout: 60000, // 60 second timeout for long-running inserts
+      max_open_connections: 1, // Single connection for sequential inserts
     });
   }
   return clickhouseClientInstance;
@@ -225,24 +227,53 @@ export async function getRowCount(): Promise<number> {
   return rows[0].count;
 }
 
-async function insertBatch(rows: ImagesAnalyticalRow[]): Promise<void> {
+async function insertBatch(rows: ImagesAnalyticalRow[], waitForAsyncInsert: boolean = true): Promise<void> {
   // Convert rows to ClickHouse format
   const formattedRows = rows.map(rowToClickHouseFormat);
 
   // Get ClickHouse client
   const client = await getClickHouseClient();
 
-  // Insert using the native ClickHouse client insert method
-  // This properly handles JSONEachRow format
-  await client.insert({
-    table: 'images_analytical',
-    values: formattedRows,
-    format: 'JSONEachRow',
-    clickhouse_settings: {
-      async_insert: 1,
-      wait_for_async_insert: 1,
-    },
-  });
+  // Retry logic for connection stability during long runs
+  const maxRetries = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Insert using the native ClickHouse client insert method
+      // This properly handles JSONEachRow format
+      const clickhouseSettings: Record<string, number> = {
+        async_insert: 1,
+      };
+      
+      // Only set wait_for_async_insert if requested (default: true)
+      // When false, ClickHouse batches inserts internally for better throughput
+      if (waitForAsyncInsert) {
+        clickhouseSettings.wait_for_async_insert = 1;
+      }
+
+      await client.insert({
+        table: 'images_analytical',
+        values: formattedRows,
+        format: 'JSONEachRow',
+        clickhouse_settings: clickhouseSettings,
+      });
+      return; // Success, exit retry loop
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // If it's a connection error and we have retries left, wait and retry
+      if (attempt < maxRetries) {
+        const waitMs = attempt * 1000; // Exponential backoff: 1s, 2s, 3s
+        console.warn(`Insert failed (attempt ${attempt}/${maxRetries}), retrying in ${waitMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+      
+      // Out of retries, throw the error
+      throw lastError;
+    }
+  }
 }
 
 /**
@@ -262,6 +293,7 @@ export async function generateData(
   const targetRows = checkpoint.target_rows;
   const batchSize = checkpoint.batch_size;
   const seed = checkpoint.seed;
+  const waitForAsyncInsert = checkpoint.wait_for_async_insert !== false; // Default to true
   const startTime = Date.now();
 
   let currentImageId = startImageId;
@@ -269,6 +301,10 @@ export async function generateData(
   let batchesCompleted = checkpoint.batches_completed;
   const batch: ImagesAnalyticalRow[] = [];
   const totalBatches = Math.ceil((targetRows - rowsInserted) / batchSize);
+
+  // Calculate target image_id once (don't recalculate as rowsInserted changes)
+  const rowsToGenerate = targetRows - checkpoint.rows_inserted;
+  const targetImageId = startImageId + rowsToGenerate;
 
   // Warn if batch size is less than optimal
   if (batchSize < MIN_BATCH_SIZE && targetRows >= MIN_BATCH_SIZE) {
@@ -278,7 +314,7 @@ export async function generateData(
   }
 
   try {
-    while (currentImageId < startImageId + (targetRows - rowsInserted)) {
+    while (currentImageId < targetImageId) {
       // Generate row
       const row = generateRow(currentImageId, seed);
       batch.push(row);
@@ -286,7 +322,7 @@ export async function generateData(
 
       // Insert batch when it reaches batch size
       if (batch.length >= batchSize) {
-        await insertBatch(batch);
+        await insertBatch(batch, waitForAsyncInsert);
         rowsInserted += batch.length;
         batchesCompleted++;
         batch.length = 0; // Clear batch
@@ -324,7 +360,7 @@ export async function generateData(
           `Warning: Inserting ${batch.length} rows (less than optimal ${MIN_BATCH_SIZE})`
         );
       }
-      await insertBatch(batch);
+      await insertBatch(batch, waitForAsyncInsert);
       rowsInserted += batch.length;
       batchesCompleted++;
 

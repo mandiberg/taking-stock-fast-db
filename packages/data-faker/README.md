@@ -77,7 +77,8 @@ pnpm start --count  # Query row count
 - `--rows <number>` - Target number of rows (default: calculate from target-size)
 - `--target-size <size>` - Target data size in GB/MB/KB (default: 100GB)
   - Examples: `100GB`, `50GB`, `1024MB`
-- `--batch-size <number>` - Rows per insert batch (default: 10000, minimum: 10000 for optimal performance)
+- `--batch-size <number>` - Rows per insert batch (default: 10000, minimum: 10000 for optimal performance. Larger batches (50k-100k) may improve throughput for large datasets)
+- `--async-no-wait` - Disable wait_for_async_insert - let ClickHouse batch inserts internally for better throughput (may reduce immediate feedback)
 - `--seed <string>` - Random seed for reproducibility (default: random, saved in checkpoint)
 - `--start-image-id <number>` - Starting image_id (default: from checkpoint or 1)
 - `--reset` - Ignore existing checkpoint and start fresh
@@ -100,6 +101,19 @@ pnpm start --rows 1000000 --batch-size 10000
 ```bash
 pnpm start --target-size 100GB --batch-size 10000
 ```
+
+**Large dataset (50M rows):**
+```bash
+# Use defaults - 10k batch size is optimal (~75k rows/sec)
+pnpm dev:faker --rows 50000000 --reset
+
+# Optional: Try --async-no-wait to see if it helps
+pnpm dev:faker --rows 50000000 --async-no-wait --reset
+```
+- Default 10k batch size performs best
+- Initial rate: ~75k rows/sec (empty table)
+- Sustained rate: ~30-35k rows/sec (as data accumulates)
+- Expected time for 50M rows: ~40-45 minutes at sustained rate
 
 **Resume interrupted run:**
 ```bash
@@ -271,6 +285,35 @@ ClickHouse performs best with large batches (10k+ rows). The tool enforces this:
 - **Throughput**: 20k-50k rows/sec (depends on hardware and ClickHouse configuration)
 - **Bottleneck**: ClickHouse network I/O and serialization (not string generation)
 - **Memory**: Minimal - batches are streamed, not held in memory
+
+### Performance Optimization
+
+**Default 10k batch size is optimal!** Testing shows:
+- **10k batches**: ~75k rows/sec (optimal)
+- **100k batches**: ~30k rows/sec (slower!)
+
+**Why smaller batches are faster:**
+- Sorting 10k rows is much faster than sorting 100k rows (even if done more often)
+- ClickHouse can process multiple smaller batches in parallel
+- Better memory locality and cache efficiency
+- Less blocking per operation
+
+**Optimization options:**
+
+1. **Disable wait_for_async_insert** - May help by letting ClickHouse batch internally
+   ```bash
+   --async-no-wait
+   ```
+   Test to see if it improves throughput.
+
+2. **Larger batch sizes** - ⚠️ **Not recommended** - Actually slower for this schema
+   - Sorting overhead increases faster than batch count decreases
+   - Stick with default 10k batch size
+
+**Expected performance:** 
+- Initial burst: ~70-80k rows/sec (empty table, minimal sorting)
+- Sustained rate: ~30-35k rows/sec (as data accumulates, sorting/merging becomes more expensive)
+- The bottleneck is ClickHouse's processing (sorting 8 columns, compression, disk I/O, partition merging)
 
 ### Performance Tips
 

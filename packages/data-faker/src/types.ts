@@ -99,6 +99,7 @@ export interface CheckpointData {
   seed: string;
   target_rows: number;
   batch_size: number;
+  wait_for_async_insert?: boolean; // Whether to wait for async insert completion (default: true)
   total_time_seconds?: number;
   average_rate_rows_per_sec?: number;
 }

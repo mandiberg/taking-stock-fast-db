@@ -67,7 +67,8 @@ export function deleteCheckpoint(): void {
 export function createInitialCheckpoint(
   seed: string,
   targetRows: number,
-  batchSize: number
+  batchSize: number,
+  waitForAsyncInsert: boolean = true
 ): CheckpointData {
   const now = new Date().toISOString();
   return {
@@ -79,6 +80,7 @@ export function createInitialCheckpoint(
     seed,
     target_rows: targetRows,
     batch_size: batchSize,
+    wait_for_async_insert: waitForAsyncInsert,
   };
 }
 
