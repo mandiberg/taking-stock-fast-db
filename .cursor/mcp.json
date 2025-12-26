@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "moose-dev": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:4000/mcp"
+      ]
+    }
+  }
+}
