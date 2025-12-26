@@ -83,6 +83,19 @@ See [packages/data-faker/README.md](./packages/data-faker/README.md) for complet
 
 **Note:** The data faker requires MooseStack service to be running (or at least ClickHouse accessible) to insert data. Run `pnpm dev:moose` first if ClickHouse isn't already running.
 
+## Performance
+
+Benchmarks over **65 million rows** (8 GB compressed, 15 GB uncompressed):
+
+| Query Type | Time |
+|------------|------|
+| Simple aggregations | ~300ms |
+| Cross-tabulations (gender × region) | ~300ms |
+| Multi-filter queries | ~300ms |
+| Full table scans | ~300ms |
+
+ClickHouse scans 15 GB of data at ~25 GB/sec on a laptop. See [Performance Benchmarks](./speed-tests.md) for full methodology and results.
+
 ## MCP Tools Available
 
 - **`query_clickhouse`** - Execute read-only SQL queries against ClickHouse with automatic result limiting
@@ -91,6 +104,7 @@ See [packages/data-faker/README.md](./packages/data-faker/README.md) for complet
 ## Learn More
 
 - [Data Migration Plan](./data-migration.md) - Strategy for migrating from MySQL/MongoDB to ClickHouse
+- [Performance Benchmarks](./speed-tests.md) - Query speed tests over 65M rows
 - [Development Guide](./development.md) - Data models and ingestion API
 - [Security](./security.md) - Security features and production considerations
 - [MooseStack Documentation](https://docs.moosejs.com)

@@ -1,0 +1,206 @@
+{
+  "benchmark_date": "2025-12-26T21:36:26.931Z",
+  "iterations": 10,
+  "queries": {
+    "01_total_count": {
+      "description": "Simple full table count - baseline measurement",
+      "query": "SELECT COUNT(*) as total FROM images_analytical",
+      "times_ms": [
+        1512.7,
+        745.7,
+        719.5,
+        787.5,
+        774.4,
+        485.7,
+        510.9,
+        484.4,
+        529.3,
+        528.9
+      ],
+      "avg_ms": 707.9,
+      "min_ms": 484.4,
+      "max_ms": 1512.7,
+      "std_ms": 293.6
+    },
+    "02_gender_distribution": {
+      "description": "Gender breakdown with grouping - demographic analysis",
+      "query": "SELECT gender, COUNT(*) as count FROM images_analytical WHERE gender != '' GROUP BY gender ORDER BY count DESC",
+      "times_ms": [
+        1273.9,
+        495.9,
+        535,
+        908,
+        552.9,
+        624.1,
+        528.6,
+        521.6,
+        526,
+        525.1
+      ],
+      "avg_ms": 649.1,
+      "min_ms": 495.9,
+      "max_ms": 1273.9,
+      "std_ms": 237.7
+    },
+    "03_ethnicity_breakdown": {
+      "description": "Ethnicity distribution using boolean columns",
+      "query": "SELECT SUM(ethnicity_white) as white, SUM(ethnicity_black) as black, SUM(ethnicity_asian) as asian, SUM(ethnicity_hispanic) as hispanic, SUM(ethnicity_middle_eastern) as middle_eastern, SUM(ethnicity_mixed) as mixed FROM images_analytical",
+      "times_ms": [
+        983.9,
+        473.2,
+        636.6,
+        523.5,
+        525.4,
+        529.4,
+        521.3,
+        429.1,
+        502.6,
+        542
+      ],
+      "avg_ms": 566.7,
+      "min_ms": 429.1,
+      "max_ms": 983.9,
+      "std_ms": 147.8
+    },
+    "04_top_countries": {
+      "description": "Geographic distribution - top 15 countries",
+      "query": "SELECT country_code, COUNT(*) as count FROM images_analytical WHERE country_code != '' GROUP BY country_code ORDER BY count DESC LIMIT 15",
+      "times_ms": [
+        741.1,
+        541.8,
+        501.5,
+        580.4,
+        480.4,
+        583.2,
+        561.9,
+        534.8,
+        525.1,
+        508.9
+      ],
+      "avg_ms": 555.9,
+      "min_ms": 480.4,
+      "max_ms": 741.1,
+      "std_ms": 69.4
+    },
+    "05_face_presence_filter": {
+      "description": "Filtered count using ordering key (optimal)",
+      "query": "SELECT COUNT(*) as faces FROM images_analytical WHERE has_face = 1",
+      "times_ms": [
+        845.2,
+        508.7,
+        521,
+        436.3,
+        613,
+        526.2,
+        523.6,
+        526.8,
+        524.1,
+        522.8
+      ],
+      "avg_ms": 554.8,
+      "min_ms": 436.3,
+      "max_ms": 845.2,
+      "std_ms": 104.7
+    },
+    "06_gender_by_region": {
+      "description": "Cross-tabulation - gender distribution by region",
+      "query": "SELECT region, gender, COUNT(*) as count FROM images_analytical WHERE region != '' AND gender != '' GROUP BY region, gender ORDER BY region, count DESC",
+      "times_ms": [
+        788.3,
+        503.3,
+        511.3,
+        526.4,
+        513.9,
+        514.1,
+        553.2,
+        540.7,
+        530.6,
+        518
+      ],
+      "avg_ms": 550,
+      "min_ms": 503.3,
+      "max_ms": 788.3,
+      "std_ms": 80.7
+    },
+    "07_topic_distribution": {
+      "description": "Topic model results - top 20 topics",
+      "query": "SELECT topic_id_1, COUNT(*) as count FROM images_analytical WHERE topic_id_1 > 0 GROUP BY topic_id_1 ORDER BY count DESC LIMIT 20",
+      "times_ms": [
+        794.6,
+        520.8,
+        520.5,
+        528.9,
+        522.8,
+        520.4,
+        529.2,
+        525.1,
+        525.1,
+        522.7
+      ],
+      "avg_ms": 551,
+      "min_ms": 520.4,
+      "max_ms": 794.6,
+      "std_ms": 81.2
+    },
+    "08_body_pose_clusters": {
+      "description": "Body pose cluster distribution",
+      "query": "SELECT body_pose_cluster_512, COUNT(*) as count FROM images_analytical WHERE body_pose_cluster_512 > 0 GROUP BY body_pose_cluster_512 ORDER BY count DESC LIMIT 20",
+      "times_ms": [
+        765.2,
+        477.9,
+        456.9,
+        544.5,
+        534.4,
+        483.9,
+        567.5,
+        574.5,
+        537,
+        559.9
+      ],
+      "avg_ms": 550.2,
+      "min_ms": 456.9,
+      "max_ms": 765.2,
+      "std_ms": 81.2
+    },
+    "09_multi_filter": {
+      "description": "Multi-condition filter using ordering key prefix",
+      "query": "SELECT COUNT(*) as count FROM images_analytical WHERE has_face = 1 AND has_body = 1 AND detection_top_class_id > 0",
+      "times_ms": [
+        787.1,
+        528.4,
+        516.7,
+        531.3,
+        522.2,
+        521.2,
+        529.4,
+        521.1,
+        524.2,
+        525.9
+      ],
+      "avg_ms": 550.8,
+      "min_ms": 516.7,
+      "max_ms": 787.1,
+      "std_ms": 78.9
+    },
+    "10_site_demographics": {
+      "description": "Cross-tabulation - demographics by stock photo site",
+      "query": "SELECT site_name, gender, COUNT(*) as count FROM images_analytical WHERE site_name != '' GROUP BY site_name, gender ORDER BY site_name, count DESC",
+      "times_ms": [
+        805.2,
+        561.2,
+        548,
+        493.8,
+        536.4,
+        511.8,
+        504.6,
+        541.1,
+        505.2,
+        541.6
+      ],
+      "avg_ms": 554.9,
+      "min_ms": 493.8,
+      "max_ms": 805.2,
+      "std_ms": 86.1
+    }
+  }
+}
