@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
-import clickhouse_connect
+import subprocess
+import sys
 
 def test_clickhouse_connection():
-    """Test ClickHouse connection with the provided credentials"""
+    """Test ClickHouse connection using the native client program"""
     try:
-        client = clickhouse_connect.get_client(
-            host='localhost',
-            port=8123,
-            username='panda',
-            password='pandapass',
-            database='local'
+        result = subprocess.run(
+            [
+                'clickhouse-client',
+                '--host', 'localhost',
+                '--port', '9000',
+                '--user', 'panda',
+                '--password', 'pandapass',
+                '--database', 'local',
+                '--query', 'SELECT 1 AS test'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5
         )
         
-        # Simple test query
-        result = client.query('SELECT 1 AS test')
-        print("✓ ClickHouse connection successful!")
-        print(f"Query result: {result.result_set}")
+        if result.returncode == 0:
+            print("✓ ClickHouse connection successful!")
+            print(f"Query result: {result.stdout.strip()}")
+            return True
+        else:
+            print(f"✗ Connection failed: {result.stderr}")
+            return False
         
     except Exception as e:
         print(f"✗ Connection failed: {e}")
         return False
-    
-    return True
 
 if __name__ == '__main__':
     test_clickhouse_connection()

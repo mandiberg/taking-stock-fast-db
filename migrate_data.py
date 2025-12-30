@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import mysql.connector
-import clickhouse_connect
+import subprocess
 import json
 from datetime import datetime
     
@@ -25,7 +25,7 @@ CLICKHOUSE_CONFIG = myPasswords.clickhouse
 #     'database': '<clickhouse_database>'
 # }
 
-BATCH_SIZE = 100
+BATCH_SIZE = 10000
 
 def extract_batch(mysql_conn, start_id, end_id):
     """Extract and transform a batch of images"""
@@ -134,7 +134,6 @@ def extract_batch(mysql_conn, start_id, end_id):
         FROM Detections d
         GROUP BY image_id
     ) det ON i.image_id = det.image_id
-    WHERE i.image_id >= ? AND i.image_id < ?
     WHERE i.image_id >= %s AND i.image_id < %s
     ORDER BY i.image_id;
         """
@@ -148,12 +147,12 @@ def transform_row(row, keywords_dict, ethnicity_dict):
     # ... transformation logic ...
     return transformed_row
 
-def insert_batch(clickhouse_client, rows):
-    """Insert batch into ClickHouse"""
+def insert_batch(rows):
+    """Insert batch into ClickHouse using native protocol"""
     if not rows:
         return
     
-    # Format rows for INSERT
+    # Format rows for INSERT statement
     values = []
     for row in rows:
         values.append((
@@ -164,12 +163,44 @@ def insert_batch(clickhouse_client, rows):
             row['updated_at']
         ))
     
-    clickhouse_client.insert('images_analytical', values)
+    # Build INSERT statement
+    if not values:
+        return
+    
+    # Convert tuples to VALUES clause format
+    values_str = ','.join([str(v) for v in values])
+    insert_query = f"INSERT INTO images_analytical VALUES {values_str}"
+    
+    # Execute via clickhouse-client using native protocol
+    try:
+        result = subprocess.run(
+            [
+                'clickhouse-client',
+                '--host', CLICKHOUSE_CONFIG['host'],
+                '--port', str(CLICKHOUSE_CONFIG['port']),
+                '--user', CLICKHOUSE_CONFIG['username'],
+                '--password', CLICKHOUSE_CONFIG['password'],
+                '--database', CLICKHOUSE_CONFIG['database'],
+                '--query', insert_query
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            print(f"✗ Insert failed: {result.stderr}")
+            raise Exception(f"ClickHouse insert error: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        print(f"✗ Insert timed out")
+        raise
+    except Exception as e:
+        print(f"✗ Insert error: {e}")
+        raise
 
 def migrate_range(start_id, end_id):
     """Migrate a range of image_ids"""
     mysql_conn = mysql.connector.connect(**MYSQL_CONFIG)
-    clickhouse_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     
     current_id = start_id
     while current_id < end_id:
@@ -177,18 +208,23 @@ def migrate_range(start_id, end_id):
         
         # Extract
         mysql_rows = extract_batch(mysql_conn, current_id, batch_end)
+        print(f"Extracted {len(mysql_rows)} rows from MySQL for IDs {current_id} to {batch_end}")
         
+        # save mySQL_rows for review
+        with open(f'mysql_rows_{current_id}_{batch_end}.json', 'w') as f:
+            json.dump(mysql_rows, f, default=str, indent=2)
+        
+
         # Transform
         transformed_rows = [transform_row(row, keywords_dict, ethnicity_dict) for row in mysql_rows]
         
         # Insert
-        insert_batch(clickhouse_client, transformed_rows)
+        insert_batch(transformed_rows)
         
         print(f"Migrated {current_id} to {batch_end}")
         current_id = batch_end
     
     mysql_conn.close()
-    clickhouse_client.close()
 
 if __name__ == '__main__':
     # Get total range
