@@ -4,3 +4,5 @@ dist
 coverage
 .ts-node
 
+myPasswords.py
+.DS_Store

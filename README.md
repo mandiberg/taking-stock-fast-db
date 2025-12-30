@@ -38,6 +38,9 @@ Create API Key authentication tokens
 ```bash
 $ cd packages/moosestack-service
 moose generate hash-token # use output for the API Key & Token below
+
+# if you get "command not found: moose" try this version instead:
+pnpm exec moose generate hash-token  
 ```
 
 Set environment variables
