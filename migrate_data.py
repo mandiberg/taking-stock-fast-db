@@ -190,6 +190,67 @@ def format_date_for_ch(value):
     return str(value)
 
 
+def get_clickhouse_max_image_id():
+    """Return the maximum image_id currently in ClickHouse, or None if unavailable.
+
+    Tries the configured port first, then falls back to port 9000. Handles missing table gracefully.
+    """
+    host = CLICKHOUSE_CONFIG.get('host', '127.0.0.1')
+    if host == 'localhost':
+        host = '127.0.0.1'
+    username = CLICKHOUSE_CONFIG.get('username')
+    password = CLICKHOUSE_CONFIG.get('password')
+    database = CLICKHOUSE_CONFIG.get('database')
+
+    def run_query_on_port(p):
+        cmd = ['clickhouse-client', '--host', host, '--port', str(p), '--query']
+        query = f"SELECT max(image_id) FROM {database + '.' if database else ''}images_analytical"
+        cmd.append(query)
+        if username is not None:
+            cmd += ['--user', username]
+        if password is not None:
+            cmd += ['--password', password]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except FileNotFoundError:
+            return None, 'clickhouse-client not found'
+        except Exception as e:
+            return None, str(e)
+
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or '').strip()
+            # If the table does not exist, return None (no rows migrated yet)
+            if 'does not exist' in err or 'UNKNOWN_TABLE' in err or 'NO_SUCH_TABLE' in err:
+                return None, err
+            return None, err
+
+        out = (proc.stdout or '').strip()
+        try:
+            if out == '' or out.lower() == 'nan':
+                return None, ''
+            return int(out), ''
+        except Exception as e:
+            return None, f'parse error: {e} - output: {out}'
+
+    # Try configured port first
+    try:
+        configured_port = int(CLICKHOUSE_CONFIG.get('port', 0))
+    except Exception:
+        configured_port = 0
+
+    # Try configured port, then 9000
+    for p in (configured_port, 9000):
+        if not p:
+            continue
+        val, err = run_query_on_port(p)
+        if val is not None:
+            print(f"ClickHouse contains max(image_id)={val} on port {p}")
+            return val
+        # else keep trying
+    print('Could not determine max(image_id) from ClickHouse (table may not exist or auth failed)')
+    return None
+
+
 def transform_row(row, keywords_dict, ethnicity_dict):
     """Transform MySQL row to ClickHouse JSON row format"""
     image_id = row['image_id']
@@ -507,6 +568,14 @@ if __name__ == '__main__':
 
     start = args.start if args.start is not None else min_id
     end = args.end if args.end is not None else max_id
+
+    # Bump start to avoid reprocessing rows already present in ClickHouse: use max(image_id)+1 if it's larger
+    ch_max = get_clickhouse_max_image_id()
+    if ch_max is not None:
+        bumped = max(start, ch_max + 1)
+        if bumped != start:
+            print(f"Adjusting start from {start} to {bumped} because ClickHouse already contains rows up to image_id={ch_max}")
+            start = bumped
 
     if start is None or end is None:
         print("Could not determine image ID range from database and no --start/--end provided")
