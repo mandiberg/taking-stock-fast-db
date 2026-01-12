@@ -233,8 +233,8 @@ export function generateCluster(
   rng: RNG,
   maxClusters: number,
   unclusteredProb: number
-): number {
-  if (rng() < unclusteredProb) return 0;
+): number | null {
+  if (rng() < unclusteredProb) return null;
   return Math.floor(rng() * maxClusters) + 1;
 }
 

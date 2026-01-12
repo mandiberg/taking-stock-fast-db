@@ -51,15 +51,20 @@ export interface ImagesAnalyticalRow {
   face_z: number;
   mouth_gap: number;
 
-  // Cluster Assignments
-  body_pose_cluster_256: number;
-  body_pose_cluster_512: number;
-  body_pose_cluster_768: number;
-  hand_gesture_cluster_32: number;
-  hand_gesture_cluster_64: number;
-  hand_position_cluster_128: number;
-  hsv_cluster: number;
-  face_cluster: number;
+  // Cluster Assignments (nullable for unclustered)
+  body_pose_cluster_256: number | null;
+  body_pose_cluster_512: number | null;
+  body_pose_cluster_768: number | null;
+  hand_poses_cluster_32: number | null;          // new
+  hand_gesture_cluster_32: number | null;       // keep old name nullable for backwards compatibility
+  hand_gesture_cluster_64: number | null;
+  hand_gesture_cluster_128: number | null;      // new
+  arms_poses3D_cluster_64: number | null;       // new
+  hand_position_cluster_128: number | null;
+  hsv_cluster: number | null;
+  meta_hsv_cluster: number | null;              // new
+  face_cluster: number | null;
+  arm_poses3D_cluster_128: number | null; // new (128 clusters)
 
   // Topic Model Results
   topic_id_1: number;
@@ -69,7 +74,16 @@ export interface ImagesAnalyticalRow {
   topic_id_3: number;
   topic_score_3: number;
 
+  // Additional topic-derived fields
+  is_not_face_topic_id: number | null;
+  is_not_face_score: number;
+  is_face_model_topic_id: number | null;
+  is_face_model_score: number;
+  affect_id: number | null;
+  affect_score: number;
+
   // Detection Summaries
+  obj_cluster: number | null; // future object cluster
   detection_count: number;
   detection_classes: number[];
   detection_top_class_id: number;

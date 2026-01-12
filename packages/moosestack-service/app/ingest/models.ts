@@ -133,23 +133,34 @@ export interface ImagesAnalytical {
   mouth_gap: Decimal<6, 3>; // 0.0 = unknown
 
   // Cluster Assignments
-  // Use 0 for unclustered to avoid nullable performance penalty
-  /** Body pose cluster (256 clusters) - 0 = not clustered */
-  body_pose_cluster_256: UInt16; // 0 = not clustered
-  /** Body pose cluster (512 clusters) - THIRD in ordering key, 0 = not clustered */
-  body_pose_cluster_512: UInt16; // 0 = not clustered
-  /** Body pose cluster (768 clusters) - 0 = not clustered */
-  body_pose_cluster_768: UInt16; // 0 = not clustered
-  /** Hand gesture cluster (32 clusters) - 0 = not clustered */
-  hand_gesture_cluster_32: UInt8; // 0 = not clustered
-  /** Hand gesture cluster (64 clusters) - 0 = not clustered */
-  hand_gesture_cluster_64: UInt8; // 0 = not clustered
-  /** Hand position cluster (128 clusters) - FOURTH in ordering key, 0 = not clustered */
-  hand_position_cluster_128: UInt8; // 0 = not clustered
-  /** HSV color cluster - 0 = not clustered */
-  hsv_cluster: UInt16; // 0 = not clustered
-  /** Face cluster - 0 = not clustered */
-  face_cluster: UInt16; // 0 = not clustered
+  // Nullable for unclustered values (NULL = not clustered)
+  /** Body pose cluster (256 clusters) - NULL = not clustered */
+  body_pose_cluster_256: UInt16 | null; // NULL = not clustered
+  /** Body pose cluster (512 clusters) - THIRD in ordering key, NULL = not clustered */
+  body_pose_cluster_512: UInt16 | null; // NULL = not clustered
+  /** Body pose cluster (768 clusters) - NULL = not clustered */
+  body_pose_cluster_768: UInt16 | null; // NULL = not clustered
+  /** Hand poses cluster (32 clusters) - NULL = not clustered (new) */
+  hand_poses_cluster_32: UInt8 | null; // NULL = not clustered
+  
+  /** DELETE THIS Hand gesture cluster (32 clusters) - kept for compatibility - NULL = not clustered */
+  hand_gesture_cluster_32: UInt8 | null; // NULL = not clustered
+  /** DELETE THIS Hand gesture cluster (64 clusters) - NULL = not clustered */
+  hand_gesture_cluster_64: UInt8 | null; // NULL = not clustered
+  /** Hand gesture cluster (128 clusters) - NULL = not clustered (new) */
+  hand_gesture_cluster_128: UInt8 | null; // NULL = not clustered
+  /** Arm poses 3D cluster (64 clusters) - NULL = not clustered (new) */
+  arms_poses3D_cluster_64: UInt8 | null; // NULL = not clustered
+  /** Arm poses 3D cluster (128 clusters) - NULL = not clustered (new) */
+  arm_poses3D_cluster_128: UInt8 | null; // NULL = not clustered
+  /** DELETE THIS Hand position cluster (128 clusters) - FOURTH in ordering key - NULL = not clustered */
+  hand_position_cluster_128: UInt8 | null; // NULL = not clustered
+  /** HSV color cluster - NULL = not clustered */
+  hsv_cluster: UInt16 | null; // NULL = not clustered
+  /** Meta HSV color cluster - NULL = not clustered (new) */
+  meta_hsv_cluster: UInt16 | null; // NULL = not clustered
+  /** Face cluster - NULL = not clustered */
+  face_cluster: UInt16 | null; // NULL = not clustered
 
   // Topic Model Results (top 3 topics per image)
   // Use 0 for missing topics to avoid nullable performance penalty
@@ -166,6 +177,20 @@ export interface ImagesAnalytical {
   /** Tertiary topic score - 0.0 = no tertiary topic */
   topic_score_3: Float32; // 0.0 = no tertiary topic
 
+  // Additional topic-derived fields
+  /** Topic id indicating 'not face' detection - NULL = none */
+  is_not_face_topic_id: UInt16 | null;
+  /** Score for is_not_face topic - 0.0 = none */
+  is_not_face_score: Float32; // 0.0 = none
+  /** Topic id for face model - NULL = none */
+  is_face_model_topic_id: UInt16 | null;
+  /** Score for is_face_model topic - 0.0 = none */
+  is_face_model_score: Float32; // 0.0 = none
+  /** Affect topic id - NULL = none */
+  affect_id: UInt16 | null;
+  /** Affect score - 0.0 = none */
+  affect_score: Float32; // 0.0 = none
+
   // Detection Summaries (aggregated from Detections table during ETL)
   /** Total number of detections */
   detection_count: UInt16;
@@ -175,6 +200,9 @@ export interface ImagesAnalytical {
   detection_top_class_id: UInt8; // 0 = no detections
   /** Confidence score of top detected class - 0.0 = no detections */
   detection_top_class_confidence: Float32; // 0.0 = no detections
+
+  /** Object cluster - NULL = not clustered (future) */
+  obj_cluster: UInt16 | null; // NULL = not clustered
 
   // Metadata
   /** Upload date - toDate('1970-01-01') = unknown (epoch date) */

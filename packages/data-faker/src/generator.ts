@@ -3,7 +3,8 @@ import { getMooseUtils } from '@514labs/moose-lib';
 import type { ImagesAnalyticalRow } from './types.js';
 import { generateCaption } from './captions.js';
 import * as dist from './distributions.js';
-import { updateCheckpoint, saveCheckpoint, type CheckpointData } from './checkpoint.js';
+import { updateCheckpoint, saveCheckpoint } from './checkpoint.js';
+import type { CheckpointData } from './types.js';
 import { createClient } from '@clickhouse/client';
 
 // Note: We use raw SQL INSERT instead of OlapTable.insert() because:
@@ -72,11 +73,24 @@ function generateRow(imageId: number, seed: string): ImagesAnalyticalRow {
     body_pose_cluster_256: dist.generateCluster(rng, 256, 0.30),
     body_pose_cluster_512: dist.generateCluster(rng, 512, 0.30),
     body_pose_cluster_768: dist.generateCluster(rng, 768, 0.30),
+    hand_poses_cluster_32: dist.generateCluster(rng, 32, 0.50),
     hand_gesture_cluster_32: dist.generateCluster(rng, 32, 0.50),
     hand_gesture_cluster_64: dist.generateCluster(rng, 64, 0.50),
+    hand_gesture_cluster_128: dist.generateCluster(rng, 128, 0.50),
+    arm_poses3D_cluster_128: dist.generateCluster(rng, 128, 0.60),
+    arms_poses3D_cluster_64: dist.generateCluster(rng, 64, 0.60),
     hand_position_cluster_128: dist.generateCluster(rng, 128, 0.40),
     hsv_cluster: dist.generateCluster(rng, 512, 0.25),
+    meta_hsv_cluster: dist.generateCluster(rng, 256, 0.25),
     face_cluster: dist.generateCluster(rng, 256, 0.20),
+    // Topic-derived example fields (simulated)
+    is_not_face_topic_id: (rng() < 0.10) ? Math.floor(rng() * 200) + 1 : null,
+    is_not_face_score: (rng() < 0.10) ? Math.round(rng() * 1000) / 1000 : 0.0,
+    is_face_model_topic_id: (rng() < 0.05) ? Math.floor(rng() * 200) + 1 : null,
+    is_face_model_score: (rng() < 0.05) ? Math.round(rng() * 1000) / 1000 : 0.0,
+    affect_id: (rng() < 0.20) ? Math.floor(rng() * 50) + 1 : null,
+    affect_score: (rng() < 0.20) ? Math.round(rng() * 1000) / 1000 : 0.0,
+    obj_cluster: null, // future: object cluster assignment
     ...topics,
     detection_count: detections.count,
     detection_classes: detections.classes,
@@ -148,11 +162,23 @@ function rowToClickHouseFormat(row: ImagesAnalyticalRow): any {
     body_pose_cluster_256: row.body_pose_cluster_256,
     body_pose_cluster_512: row.body_pose_cluster_512,
     body_pose_cluster_768: row.body_pose_cluster_768,
+    hand_poses_cluster_32: row.hand_poses_cluster_32,
     hand_gesture_cluster_32: row.hand_gesture_cluster_32,
     hand_gesture_cluster_64: row.hand_gesture_cluster_64,
+    hand_gesture_cluster_128: row.hand_gesture_cluster_128,
+    arms_poses3D_cluster_64: row.arms_poses3D_cluster_64,
     hand_position_cluster_128: row.hand_position_cluster_128,
     hsv_cluster: row.hsv_cluster,
+    meta_hsv_cluster: row.meta_hsv_cluster,
     face_cluster: row.face_cluster,
+    arm_poses3D_cluster_128: row.arm_poses3D_cluster_128,
+    is_not_face_topic_id: row.is_not_face_topic_id,
+    is_not_face_score: row.is_not_face_score,
+    is_face_model_topic_id: row.is_face_model_topic_id,
+    is_face_model_score: row.is_face_model_score,
+    affect_id: row.affect_id,
+    affect_score: row.affect_score,
+    obj_cluster: row.obj_cluster,
     topic_id_1: row.topic_id_1,
     topic_score_1: row.topic_score_1,
     topic_id_2: row.topic_id_2,
@@ -215,7 +241,9 @@ export async function getRowCount(): Promise<number> {
     format: 'JSONEachRow',
   });
   
-  const data = await result.json();
+  // Typed response shape so TypeScript can validate `count`
+  type CountRow = { count: number };
+  const data = (await result.json()) as CountRow | CountRow[];
   const rows = Array.isArray(data) ? data : [data];
   
   if (rows.length === 0 || !rows[0] || typeof rows[0].count !== 'number') {

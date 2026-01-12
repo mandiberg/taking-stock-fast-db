@@ -2,7 +2,9 @@
 import mysql.connector
 import subprocess
 import json
+import types
 from datetime import datetime
+import time
     
 import myPasswords 
 # Connection configs
@@ -25,7 +27,10 @@ CLICKHOUSE_CONFIG = myPasswords.clickhouse
 #     'database': '<clickhouse_database>'
 # }
 
-BATCH_SIZE = 10000
+BATCH_SIZE = 1000
+
+# start a timer
+start_time = time.time()
 
 def extract_batch(mysql_conn, start_id, end_id):
     """Extract and transform a batch of images"""
@@ -69,25 +74,34 @@ def extract_batch(mysql_conn, start_id, end_id):
         COALESCE(e.face_y, 0.0) AS face_y,
         COALESCE(e.face_z, 0.0) AS face_z,
         COALESCE(e.mouth_gap, 0.0) AS mouth_gap,
-        -- Clusters
-        COALESCE(bp256.cluster_id, 0) AS body_pose_cluster_256,
-        COALESCE(bp512.cluster_id, 0) AS body_pose_cluster_512,
-        COALESCE(bp768.cluster_id, 0) AS body_pose_cluster_768,
-        COALESCE(hg32.cluster_id, 0) AS hand_gesture_cluster_32,
-        COALESCE(hg64.cluster_id, 0) AS hand_gesture_cluster_64,
-        COALESCE(hp128.cluster_id, 0) AS hand_position_cluster_128,
-        COALESCE(hsv.cluster_id, 0) AS hsv_cluster,
+        -- Clusters (NULL for unclustered)
+        bp256.cluster_id AS body_pose_cluster_256,
+        bp512.cluster_id AS body_pose_cluster_512,
+        bp768.cluster_id AS body_pose_cluster_768,
+        hp32.cluster_id AS hand_poses_cluster_32,
+        hg128.cluster_id AS hand_gesture_cluster_128,
+        ap128.cluster_id AS arm_poses3D_cluster_128,
+        hsv.cluster_id AS hsv_cluster,
+        meta_hsv.cluster_id AS meta_hsv_cluster,
+        c.cluster_id AS face_cluster,
         -- Topics
-        COALESCE(t.topic_id, 0) AS topic_id_1,
+        t.topic_id AS topic_id_1,
         COALESCE(t.topic_score, 0.0) AS topic_score_1,
-        COALESCE(t.topic_id2, 0) AS topic_id_2,
+        t.topic_id2 AS topic_id_2,
         COALESCE(t.topic_score2, 0.0) AS topic_score_2,
-        COALESCE(t.topic_id3, 0) AS topic_id_3,
+        t.topic_id3 AS topic_id_3,
         COALESCE(t.topic_score3, 0.0) AS topic_score_3,
+        tnf.topic_id AS is_not_face_topic_id,
+        COALESCE(tnf.topic_score, 0) AS is_not_face_score,
+        tnfm.topic_id AS is_face_model_topic_id,
+        COALESCE(tnfm.topic_score, 0) AS is_face_model_score,
+        ta.topic_id AS affect_id,
+        COALESCE(ta.topic_score, 0.0) AS affect_score,
         -- Detection summaries
         COALESCE(det.detection_count, 0) AS detection_count,
         COALESCE(det.detection_top_class_id, 0) AS detection_top_class_id,
         COALESCE(det.detection_top_class_confidence, 0.0) AS detection_top_class_confidence,
+        NULL AS obj_cluster,
         -- Duplicate handling
         COALESCE(e.is_dupe_of, 0) AS is_dupe_of,
         -- Updated timestamp (use current time for migration)
@@ -98,14 +112,24 @@ def extract_batch(mysql_conn, start_id, end_id):
     LEFT JOIN Age a ON i.age_id = a.age_id
     LEFT JOIN Location l ON i.location_id = l.location_id
     LEFT JOIN Encodings e ON i.image_id = e.image_id
+        -- JOIN Clusters
     LEFT JOIN ImagesBodyPoses3D256 bp256 ON i.image_id = bp256.image_id
     LEFT JOIN ImagesBodyPoses3D512 bp512 ON i.image_id = bp512.image_id
-    LEFT JOIN ImagesBodyPoses3D768 bp768 ON i.image_id = bp768.image_id
-    LEFT JOIN ImagesHandsGestures32 hg32 ON i.image_id = hg32.image_id
-    LEFT JOIN ImagesHandsGestures64 hg64 ON i.image_id = hg64.image_id
-    LEFT JOIN ImagesHandsPositions128 hp128 ON i.image_id = hp128.image_id
+    LEFT JOIN ImagesBodyPoses3D bp768 ON i.image_id = bp768.image_id
+    LEFT JOIN ImagesHandsPoses hp32 ON i.image_id = hp32.image_id
+    LEFT JOIN ImagesHandsGestures hg128 ON i.image_id = hg128.image_id
+    LEFT JOIN ImagesArmsPoses3D ap128 ON i.image_id = ap128.image_id
     LEFT JOIN ImagesHSV hsv ON i.image_id = hsv.image_id
+    LEFT JOIN ClustersMetaHSV meta_hsv ON hsv.cluster_id = meta_hsv.cluster_id
+    LEFT JOIN ImagesClusters c ON i.image_id = c.image_id
+        -- Topics
     LEFT JOIN ImagesTopics t ON i.image_id = t.image_id
+    LEFT JOIN ImagesTopics_isnotface tnf ON i.image_id = tnf.image_id
+    LEFT JOIN imagestopics_isnotface_isfacemodel tnfm ON i.image_id = tnfm.image_id
+    LEFT JOIN imagestopics_affect ta ON i.image_id = ta.image_id
+        -- Detections
+    -- ADD in OBJ CLUSTER WHEN IT IS READY
+    -- LEFT JOIN ImagesObjects obj ON i.image_id = obj.image_id
     LEFT JOIN (
         SELECT 
             image_id,
@@ -141,53 +165,281 @@ def extract_batch(mysql_conn, start_id, end_id):
     cursor.execute(query, (start_id, end_id))
     return cursor.fetchall()
 
+def fetch_array_map(mysql_conn, table_name, id_column, image_ids):
+    """Return a dict mapping image_id -> list of ids from a many-to-many table"""
+    if not image_ids:
+        return {}
+    cursor = mysql_conn.cursor()
+    q = f"SELECT image_id, {id_column} FROM {table_name} WHERE image_id IN ({','.join(['%s']*len(image_ids))})"
+    cursor.execute(q, tuple(image_ids))
+    res = {}
+    for image_id, val in cursor.fetchall():
+        res.setdefault(image_id, []).append(val)
+    return res
+
+
+def format_date_for_ch(value):
+    if value is None:
+        return '1970-01-01 00:00:00'
+    if isinstance(value, str):
+        if ' ' in value:
+            return value
+        return f"{value} 00:00:00"
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return str(value)
+
+
 def transform_row(row, keywords_dict, ethnicity_dict):
-    """Transform MySQL row to ClickHouse format"""
-    # Add arrays and handle sentinel values
-    # ... transformation logic ...
-    return transformed_row
+    """Transform MySQL row to ClickHouse JSON row format"""
+    image_id = row['image_id']
+
+    keyword_ids = keywords_dict.get(image_id, []) if keywords_dict is not None else []
+    ethnicity_ids = ethnicity_dict.get(image_id, []) if ethnicity_dict is not None else []
+
+    # Ethnicity boolean flags - heuristic: check presence of known IDs (this may be adjusted based on real ids)
+    ethnicity_white = 1 if 1 in ethnicity_ids else 0
+    ethnicity_black = 1 if 2 in ethnicity_ids else 0
+    ethnicity_asian = 1 if 3 in ethnicity_ids else 0
+    ethnicity_hispanic = 1 if 4 in ethnicity_ids else 0
+    ethnicity_middle_eastern = 1 if 5 in ethnicity_ids else 0
+    ethnicity_native_american = 1 if 6 in ethnicity_ids else 0
+    ethnicity_pacific_islander = 1 if 7 in ethnicity_ids else 0
+    ethnicity_mixed = 1 if 8 in ethnicity_ids else 0
+    ethnicity_other = 1 if 9 in ethnicity_ids else 0
+
+    # detection_classes not extracted in SELECT - leave empty list for now
+    detection_classes = []
+
+    transformed = {
+        'image_id': image_id,
+        'site_name_id': row.get('site_name_id', 0),
+        'site_name': row.get('site_name', ''),
+        'site_image_id': row.get('site_image_id', ''),
+        'gender_id': row.get('gender_id', 0),
+        'gender': row.get('gender', ''),
+        'age_id': row.get('age_id', 0),
+        'age': row.get('age', ''),
+        'age_detail_id': row.get('age_detail_id', 0),
+        'location_id': row.get('location_id', 0),
+        'country_code': row.get('country_code', ''),
+        'region': row.get('region', ''),
+        'keyword_ids': keyword_ids,
+        'ethnicity_ids': ethnicity_ids,
+        'ethnicity_white': ethnicity_white,
+        'ethnicity_black': ethnicity_black,
+        'ethnicity_asian': ethnicity_asian,
+        'ethnicity_hispanic': ethnicity_hispanic,
+        'ethnicity_middle_eastern': ethnicity_middle_eastern,
+        'ethnicity_native_american': ethnicity_native_american,
+        'ethnicity_pacific_islander': ethnicity_pacific_islander,
+        'ethnicity_mixed': ethnicity_mixed,
+        'ethnicity_other': ethnicity_other,
+        'has_face': row.get('has_face', 0),
+        'has_body': row.get('has_body', 0),
+        'has_feet': row.get('has_feet', 0),
+        'has_hands': row.get('has_hands', 0),
+        'has_left_hand': row.get('has_left_hand', 0),
+        'has_right_hand': row.get('has_right_hand', 0),
+        'is_face_distant': row.get('is_face_distant', 0),
+        'is_small': row.get('is_small', 0),
+        'is_face_no_lms': row.get('is_face_no_lms', 0),
+        'face_x': float(row.get('face_x', 0.0)),
+        'face_y': float(row.get('face_y', 0.0)),
+        'face_z': float(row.get('face_z', 0.0)),
+        'mouth_gap': float(row.get('mouth_gap', 0.0)),
+        # Clusters - pass through None for NULL
+        'body_pose_cluster_256': row.get('body_pose_cluster_256'),
+        'body_pose_cluster_512': row.get('body_pose_cluster_512'),
+        'body_pose_cluster_768': row.get('body_pose_cluster_768'),
+        'hand_poses_cluster_32': row.get('hand_poses_cluster_32'),
+        'hand_gesture_cluster_32': row.get('hand_gesture_cluster_32'),
+        'hand_gesture_cluster_64': row.get('hand_gesture_cluster_64'),
+        'hand_gesture_cluster_128': row.get('hand_gesture_cluster_128'),
+        'arms_poses3D_cluster_64': row.get('arms_poses3D_cluster_64'),
+        'arm_poses3D_cluster_128': row.get('arm_poses3D_cluster_128'),
+        'hand_position_cluster_128': row.get('hand_position_cluster_128'),
+        'hsv_cluster': row.get('hsv_cluster'),
+        'meta_hsv_cluster': row.get('meta_hsv_cluster'),
+        'face_cluster': row.get('face_cluster'),
+        'is_not_face_topic_id': row.get('is_not_face_topic_id'),
+        'is_not_face_score': float(row.get('is_not_face_score', 0.0)),
+        'is_face_model_topic_id': row.get('is_face_model_topic_id'),
+        'is_face_model_score': float(row.get('is_face_model_score', 0.0)),
+        'affect_id': row.get('affect_id'),
+        'affect_score': float(row.get('affect_score', 0.0)),
+        'obj_cluster': row.get('obj_cluster'),
+        'topic_id_1': row.get('topic_id_1', 0),
+        'topic_score_1': float(row.get('topic_score_1', 0.0)),
+        'topic_id_2': row.get('topic_id_2', 0),
+        'topic_score_2': float(row.get('topic_score_2', 0.0)),
+        'topic_id_3': row.get('topic_id_3', 0),
+        'topic_score_3': float(row.get('topic_score_3', 0.0)),
+        'detection_count': int(row.get('detection_count', 0)),
+        'detection_classes': detection_classes,
+        'detection_top_class_id': int(row.get('detection_top_class_id', 0)),
+        'detection_top_class_confidence': float(row.get('detection_top_class_confidence', 0.0)),
+        'upload_date': format_date_for_ch(row.get('upload_date')),
+        'author': row.get('author', ''),
+        'caption': row.get('caption', ''),
+        'content_url': row.get('content_url', ''),
+        'width': int(row.get('width', 0)),
+        'height': int(row.get('height', 0)),
+        'is_dupe_of': int(row.get('is_dupe_of', 0)),
+        'updated_at': format_date_for_ch(row.get('updated_at')),
+    }
+
+    return transformed
 
 def insert_batch(rows):
-    """Insert batch into ClickHouse using native protocol"""
+    """Insert batch into ClickHouse using JSONEachRow for safe NULL/array handling"""
     if not rows:
         return
-    
-    # Format rows for INSERT statement
-    values = []
-    for row in rows:
-        values.append((
-            row['image_id'],
-            row['site_name_id'],
-            row['site_name'],
-            # ... all columns ...
-            row['updated_at']
-        ))
-    
-    # Build INSERT statement
-    if not values:
-        return
-    
-    # Convert tuples to VALUES clause format
-    values_str = ','.join([str(v) for v in values])
-    insert_query = f"INSERT INTO images_analytical VALUES {values_str}"
-    
-    # Execute via clickhouse-client using native protocol
+
+    # Column list must match the JSON object keys and the table schema
+    columns = [
+        'image_id','site_name_id','site_name','site_image_id','gender_id','gender','age_id','age','age_detail_id','location_id','country_code','region',
+        'keyword_ids','ethnicity_ids','ethnicity_white','ethnicity_black','ethnicity_asian','ethnicity_hispanic','ethnicity_middle_eastern','ethnicity_native_american','ethnicity_pacific_islander','ethnicity_mixed','ethnicity_other',
+        'has_face','has_body','has_feet','has_hands','has_left_hand','has_right_hand','is_face_distant','is_small','is_face_no_lms',
+        'face_x','face_y','face_z','mouth_gap',
+        'body_pose_cluster_256','body_pose_cluster_512','body_pose_cluster_768','hand_poses_cluster_32','hand_gesture_cluster_32','hand_gesture_cluster_64','hand_gesture_cluster_128','arms_poses3D_cluster_64','arm_poses3D_cluster_128','hand_position_cluster_128','hsv_cluster','meta_hsv_cluster','face_cluster',
+        'is_not_face_topic_id','is_not_face_score','is_face_model_topic_id','is_face_model_score','affect_id','affect_score','obj_cluster',
+        'topic_id_1','topic_score_1','topic_id_2','topic_score_2','topic_id_3','topic_score_3',
+        'detection_count','detection_classes','detection_top_class_id','detection_top_class_confidence',
+        'upload_date','author','caption','content_url','width','height','is_dupe_of','updated_at'
+    ]
+
+    # Qualify table with configured database if provided to avoid default DB issues
+    database = CLICKHOUSE_CONFIG.get('database')
+    table_name = f"{database}.images_analytical" if database else 'images_analytical'
+
+    insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) FORMAT JSONEachRow"
+
+    # Prepare JSONEachRow payload
+    payload = '\n'.join([json.dumps(row, default=str) for row in rows])
+
     try:
-        result = subprocess.run(
-            [
-                'clickhouse-client',
-                '--host', CLICKHOUSE_CONFIG['host'],
-                '--port', str(CLICKHOUSE_CONFIG['port']),
-                '--user', CLICKHOUSE_CONFIG['username'],
-                '--password', CLICKHOUSE_CONFIG['password'],
-                '--database', CLICKHOUSE_CONFIG['database'],
-                '--query', insert_query
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
+        # Normalize host and credentials
+        host = CLICKHOUSE_CONFIG['host']
+        # Prefer IPv4 loopback to avoid unintended IPv6 ::1 connection issues on some setups
+        if host == 'localhost':
+            host = '127.0.0.1'
+        username = CLICKHOUSE_CONFIG.get('username')
+        password = CLICKHOUSE_CONFIG.get('password')
+        database = CLICKHOUSE_CONFIG.get('database')
+
+        try:
+            port_num = int(CLICKHOUSE_CONFIG.get('port', 0))
+        except Exception:
+            port_num = 0
+
+        import urllib.parse
+
+        def run_insert_with_client(p):
+            # quick health-check (include auth/database to ensure accurate auth test)
+            health_cmd = ['clickhouse-client', '--host', host, '--port', str(p), '--query', 'SELECT 1']
+            if username is not None:
+                health_cmd += ['--user', username]
+            if password is not None:
+                health_cmd += ['--password', password]
+            if database is not None:
+                health_cmd += ['--database', database]
+
+            try:
+                health = subprocess.run(health_cmd, capture_output=True, text=True, timeout=10)
+            except FileNotFoundError:
+                return (False, f'clickhouse-client not found on port {p}', None)
+            except Exception as e:
+                return (False, f'health-check error on port {p}: {e}', None)
+
+            if health.returncode != 0:
+                return (False, f'health-check failed: {health.stderr or health.stdout}', health.returncode)
+
+            args = [
+                'clickhouse-client', '--host', host, '--port', str(p), '--query', insert_query
+            ]
+            if username is not None:
+                args += ['--user', username]
+            if password is not None:
+                args += ['--password', password]
+            if database is not None:
+                args += ['--database', database]
+
+            try:
+                r = subprocess.run(
+                    args,
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                out = r.stderr or r.stdout or ''
+                ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
+                return (ok, out, r.returncode)
+            except Exception as e:
+                return (False, str(e), None)
+
+        attempts = []
+        ok = False
+
+        # 1) Prefer native TCP port 9000 when available
+        if port_num != 9000:
+            print("Trying clickhouse-client on port 9000 as primary...")
+            ok, out, rc = run_insert_with_client(9000)
+            attempts.append((f'clickhouse-client:9000', ok, out))
+            if ok:
+                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
+
+        # 2) Try clickhouse-client on configured port
+        if not ok:
+            print(f"Trying clickhouse-client on configured port {port_num}...")
+            ok, out, rc = run_insert_with_client(port_num)
+            attempts.append((f'clickhouse-client:{port_num}', ok, out))
+            if ok:
+                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
+
+        # 3) Try HTTP POST to candidate HTTP ports (prefer configured, then 18123, then 8123)
+        if not ok:
+            candidate_ports = []
+            if port_num in (18123, 8123):
+                candidate_ports.append(port_num)
+            for p in (18123, 8123):
+                if p not in candidate_ports:
+                    candidate_ports.append(p)
+
+            for p in candidate_ports:
+                # Add database param to ensure correct target DB for HTTP endpoint
+                db_part = f"&database={urllib.parse.quote_plus(database)}" if database else ''
+                url = f"http://{host}:{p}/?query={urllib.parse.quote_plus(insert_query)}{db_part}"
+                curl_cmd = ['curl', '-sS', '-X', 'POST', url, '--data-binary', '@-']
+                if username is not None and password is not None:
+                    curl_cmd += ['--user', f"{username}:{password}"]
+                print(f"Trying HTTP POST to ClickHouse at {host}:{p} (curl)...")
+                try:
+                    r = subprocess.run(
+                        curl_cmd,
+                        input=payload,
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    out = r.stdout or r.stderr or ''
+                    ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
+                    attempts.append((f'curl:{p}', ok, out))
+                    if ok:
+                        result = r
+                        break
+                except Exception as e:
+                    attempts.append((f'curl-exc:{p}', False, str(e)))
+
+        if not ok:
+            # Aggregate attempts for debugging
+            details = '\n'.join([f"{name}: ok={s}, output={o}" for (name, s, o) in attempts])
+            print(f"✗ Insert failed (all attempts):\n{details}")
+            raise Exception(f"ClickHouse insert error: {details}")
+
+
+
         if result.returncode != 0:
             print(f"✗ Insert failed: {result.stderr}")
             raise Exception(f"ClickHouse insert error: {result.stderr}")
@@ -202,6 +454,7 @@ def migrate_range(start_id, end_id):
     """Migrate a range of image_ids"""
     mysql_conn = mysql.connector.connect(**MYSQL_CONFIG)
     
+    this_round_start = time.time()
     current_id = start_id
     while current_id < end_id:
         batch_end = min(current_id + BATCH_SIZE, end_id)
@@ -209,29 +462,75 @@ def migrate_range(start_id, end_id):
         # Extract
         mysql_rows = extract_batch(mysql_conn, current_id, batch_end)
         print(f"Extracted {len(mysql_rows)} rows from MySQL for IDs {current_id} to {batch_end}")
-        
+        this_msql_time = time.time() - this_round_start
+        print(f"  MySQL query time: {this_msql_time:.2f} seconds")
         # save mySQL_rows for review
-        with open(f'mysql_rows_{current_id}_{batch_end}.json', 'w') as f:
-            json.dump(mysql_rows, f, default=str, indent=2)
-        
+
+        # with open(f'mysql_rows_{current_id}_{batch_end}.json', 'w') as f:
+        #     json.dump(mysql_rows, f, default=str, indent=2)
+
+        # Fetch many-to-many arrays for this batch
+        image_ids = [r['image_id'] for r in mysql_rows]
+        keywords_dict = fetch_array_map(mysql_conn, 'ImagesKeywords', 'keyword_id', image_ids)
+        ethnicity_dict = fetch_array_map(mysql_conn, 'ImagesEthnicity', 'ethnicity_id', image_ids)
+        mysql_array_time = time.time() - this_round_start - this_msql_time
+        print(f"  MySQL array fetch time: {mysql_array_time:.2f} seconds")
 
         # Transform
         transformed_rows = [transform_row(row, keywords_dict, ethnicity_dict) for row in mysql_rows]
-        
+
         # Insert
         insert_batch(transformed_rows)
-        
+        insert_time = time.time() - this_round_start - this_msql_time - mysql_array_time
+        print(f"  ClickHouse insert time: {insert_time:.2f} seconds")
+
         print(f"Migrated {current_id} to {batch_end}")
         current_id = batch_end
     
     mysql_conn.close()
 
 if __name__ == '__main__':
-    # Get total range
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Migrate images from MySQL to ClickHouse')
+    parser.add_argument('--start', type=int, default=None, help='Start image_id (inclusive)')
+    parser.add_argument('--end', type=int, default=None, help='End image_id (exclusive)')
+    parser.add_argument('--dry-run', action='store_true', help='Do not insert; print transformed rows for inspection')
+    parser.add_argument('--limit', type=int, default=10, help='Number of transformed rows to print in dry-run')
+    args = parser.parse_args()
+
+    # Determine overall min/max from MySQL if not provided
     mysql_conn = mysql.connector.connect(**MYSQL_CONFIG)
     cursor = mysql_conn.cursor()
     cursor.execute("SELECT MIN(image_id), MAX(image_id) FROM Images")
     min_id, max_id = cursor.fetchone()
+
+    start = args.start if args.start is not None else min_id
+    end = args.end if args.end is not None else max_id
+
+    if start is None or end is None:
+        print("Could not determine image ID range from database and no --start/--end provided")
+        mysql_conn.close()
+        raise SystemExit(1)
+
+    if args.dry_run:
+        # Extract a single batch for inspection
+        batch_end = min(start + BATCH_SIZE, end)
+        print(f"Dry-run: extracting {start} to {batch_end}")
+        mysql_rows = extract_batch(mysql_conn, start, batch_end)
+        print(f"Extracted {len(mysql_rows)} rows from MySQL")
+        image_ids = [r['image_id'] for r in mysql_rows]
+        keywords_dict = fetch_array_map(mysql_conn, 'ImagesKeywords', 'keyword_id', image_ids)
+        ethnicity_dict = fetch_array_map(mysql_conn, 'ImagesEthnicity', 'ethnicity_id', image_ids)
+        transformed_rows = [transform_row(row, keywords_dict, ethnicity_dict) for row in mysql_rows]
+
+        print(f"Printing up to {args.limit} transformed rows (JSON):")
+        for r in transformed_rows[:args.limit]:
+            print(json.dumps(r, default=str))
+
+        mysql_conn.close()
+        raise SystemExit(0)
+
     mysql_conn.close()
-    
-    migrate_range(min_id, max_id)
+    # using start_time print how long the SQL query took
+    migrate_range(start, end)

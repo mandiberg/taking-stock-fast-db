@@ -38,14 +38,18 @@ SELECT
     COALESCE(e.face_y, 0.0) AS face_y,
     COALESCE(e.face_z, 0.0) AS face_z,
     COALESCE(e.mouth_gap, 0.0) AS mouth_gap,
-    -- Clusters
-    COALESCE(bp256.cluster_id, 0) AS body_pose_cluster_256,
-    COALESCE(bp512.cluster_id, 0) AS body_pose_cluster_512,
-    COALESCE(bp768.cluster_id, 0) AS body_pose_cluster_768,
-    COALESCE(hg32.cluster_id, 0) AS hand_gesture_cluster_32,
-    COALESCE(hg64.cluster_id, 0) AS hand_gesture_cluster_64,
-    COALESCE(hp128.cluster_id, 0) AS hand_position_cluster_128,
-    COALESCE(hsv.cluster_id, 0) AS hsv_cluster,
+    -- Clusters (NULL for unclustered)
+    NULLIF(bp256.cluster_id, 0) AS body_pose_cluster_256,
+    NULLIF(bp512.cluster_id, 0) AS body_pose_cluster_512,
+    NULLIF(bp768.cluster_id, 0) AS body_pose_cluster_768,
+    NULLIF(hp32.cluster_id, 0) AS hand_poses_cluster_32,
+    NULLIF(hg32.cluster_id, 0) AS hand_gesture_cluster_32,
+    NULLIF(hg64.cluster_id, 0) AS hand_gesture_cluster_64,
+    NULLIF(hp128.cluster_id, 0) AS hand_position_cluster_128,
+    NULLIF(hsv.cluster_id, 0) AS hsv_cluster,
+    NULLIF(hg128.cluster_id, 0) AS hand_gesture_cluster_128,
+    NULLIF(ap128.cluster_id, 0) AS arm_poses3D_cluster_128,
+    NULLIF(meta_hsv.cluster_id, 0) AS meta_hsv_cluster,
     -- Topics
     COALESCE(t.topic_id, 0) AS topic_id_1,
     COALESCE(t.topic_score, 0.0) AS topic_score_1,
@@ -70,10 +74,14 @@ LEFT JOIN Encodings e ON i.image_id = e.image_id
 LEFT JOIN ImagesBodyPoses3D256 bp256 ON i.image_id = bp256.image_id
 LEFT JOIN ImagesBodyPoses3D512 bp512 ON i.image_id = bp512.image_id
 LEFT JOIN ImagesBodyPoses3D768 bp768 ON i.image_id = bp768.image_id
+LEFT JOIN ImagesHandsPoses hp32 ON i.image_id = hp32.image_id
 LEFT JOIN ImagesHandsGestures32 hg32 ON i.image_id = hg32.image_id
 LEFT JOIN ImagesHandsGestures64 hg64 ON i.image_id = hg64.image_id
 LEFT JOIN ImagesHandsPositions128 hp128 ON i.image_id = hp128.image_id
+LEFT JOIN ImagesHandsGestures128 hg128 ON i.image_id = hg128.image_id
+LEFT JOIN ImagesArmsPoses3D ap128 ON i.image_id = ap128.image_id
 LEFT JOIN ImagesHSV hsv ON i.image_id = hsv.image_id
+LEFT JOIN ClustersMetaHSV meta_hsv ON hsv.cluster_id = meta_hsv.cluster_id
 LEFT JOIN ImagesTopics t ON i.image_id = t.image_id
 LEFT JOIN (
     SELECT 
