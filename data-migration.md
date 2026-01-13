@@ -991,8 +991,8 @@ LIMIT 10;
    - Queries filtering by `has_face` will be fastest
    - Avoid queries that skip ordering key columns
 
-4. **Partition Pruning:**
-   - Queries filtering by `upload_date` will only scan relevant partitions
+4. **Time-range Queries:**
+   - Queries filtering by `upload_date` can limit scanned data
    - Use date ranges in WHERE clauses
 
 ### Error Recovery

@@ -314,7 +314,7 @@ export function generateTopics(rng: RNG): {
   };
 }
 
-// Upload date: Distributed across 2020-2024 for monthly partitioning
+// Upload date: Distributed across 2020-2024 for realistic date ranges
 export function generateUploadDate(rng: RNG): Date {
   const startYear = 2020;
   const endYear = 2024;

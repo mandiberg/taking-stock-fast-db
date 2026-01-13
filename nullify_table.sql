@@ -8,6 +8,7 @@ SELECT COUNT(*)
 FROM `images_analytical` i 
 ;
 
+
 '''
 I had to alter the table to reflect the changes in the data model
 I ended up renaming the table and creating a new one because the col I was trying to alter was a pkey:
@@ -116,5 +117,4 @@ CREATE TABLE IF NOT EXISTS local.images_analytical
     is_dupe_of UInt64,
     updated_at DateTime
 ) ENGINE = ReplacingMergeTree(updated_at)
-PARTITION BY toYYYYMM(upload_date)
 ORDER BY (site_name_id, upload_date, image_id);

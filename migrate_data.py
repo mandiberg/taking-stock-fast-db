@@ -27,7 +27,7 @@ CLICKHOUSE_CONFIG = myPasswords.clickhouse
 #     'database': '<clickhouse_database>'
 # }
 
-BATCH_SIZE = 10000
+BATCH_SIZE = 1000
 
 # start a timer
 start_time = time.time()
@@ -376,104 +376,140 @@ def insert_batch(rows):
 
     insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) FORMAT JSONEachRow"
 
-    # Use grouped insertion helper to avoid partition explosion
-    insert_grouped_rows(rows, insert_query)
-    return
-
-
-# Helper: grouped insert to avoid too many partitions in a single insert
-def insert_grouped_rows(rows_to_insert, insert_query):
-    from collections import defaultdict
-    import urllib.parse
-
-    host = CLICKHOUSE_CONFIG.get('host', '127.0.0.1')
-    if host == 'localhost':
-        host = '127.0.0.1'
-    username = CLICKHOUSE_CONFIG.get('username')
-    password = CLICKHOUSE_CONFIG.get('password')
-    database = CLICKHOUSE_CONFIG.get('database')
+    # Prepare JSONEachRow payload
+    payload = '\n'.join([json.dumps(row, default=str) for row in rows])
 
     try:
-        port_num = int(CLICKHOUSE_CONFIG.get('port', 0))
-    except Exception:
-        port_num = 0
+        # Normalize host and credentials
+        host = CLICKHOUSE_CONFIG['host']
+        # Prefer IPv4 loopback to avoid unintended IPv6 ::1 connection issues on some setups
+        if host == 'localhost':
+            host = '127.0.0.1'
+        username = CLICKHOUSE_CONFIG.get('username')
+        password = CLICKHOUSE_CONFIG.get('password')
+        database = CLICKHOUSE_CONFIG.get('database')
 
-    bucket_size = int(CLICKHOUSE_CONFIG.get('partition_bucket_size', 1000000))
-    chunk_size = int(CLICKHOUSE_CONFIG.get('chunk_size', min(1000, BATCH_SIZE)))
-
-    def run_client(p, payload_local):
-        cmd = ['clickhouse-client', '--host', host, '--port', str(p), '--query', insert_query]
-        if username is not None:
-            cmd += ['--user', username]
-        if password is not None:
-            cmd += ['--password', password]
-        if database is not None:
-            cmd += ['--database', database]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, input=payload_local, timeout=60)
-        except FileNotFoundError:
-            return (False, f'clickhouse-client not found on port {p}')
-        except Exception as e:
-            return (False, str(e))
-        out = proc.stderr or proc.stdout or ''
-        ok = (proc.returncode == 0 and not str(out).strip().startswith('Code:'))
-        return (ok, out)
-
-    def http_post(p, payload_local):
-        db_part = f"&database={urllib.parse.quote_plus(database)}" if database else ''
-        url = f"http://{host}:{p}/?query={urllib.parse.quote_plus(insert_query)}{db_part}"
-        curl_cmd = ['curl', '-sS', '-X', 'POST', url, '--data-binary', '@-']
-        if username is not None and password is not None:
-            curl_cmd += ['--user', f"{username}:{password}"]
-        try:
-            r = subprocess.run(curl_cmd, input=payload_local, capture_output=True, text=True, timeout=60)
-            out = r.stderr or r.stdout or ''
-            ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
-            return (ok, out)
-        except Exception as e:
-            return (False, str(e))
-
-    groups = defaultdict(list)
-    for row in rows_to_insert:
-        try:
-            img = int(row.get('image_id', 0))
+            port_num = int(CLICKHOUSE_CONFIG.get('port', 0))
         except Exception:
-            img = 0
-        groups[img // bucket_size].append(row)
+            port_num = 0
 
-    for bucket, grp in groups.items():
-        print(f"Inserting bucket {bucket} ({len(grp)} rows) in chunks of {chunk_size}...")
-        for i in range(0, len(grp), chunk_size):
-            chunk = grp[i:i+chunk_size]
-            payload_chunk = '\n'.join([json.dumps(r, default=str) for r in chunk])
+        import urllib.parse
 
-            ok, out = (False, '')
+        def run_insert_with_client(p):
+            # quick health-check (include auth/database to ensure accurate auth test)
+            health_cmd = ['clickhouse-client', '--host', host, '--port', str(p), '--query', 'SELECT 1']
+            if username is not None:
+                health_cmd += ['--user', username]
+            if password is not None:
+                health_cmd += ['--password', password]
+            if database is not None:
+                health_cmd += ['--database', database]
 
-            if port_num != 9000:
-                print('  trying clickhouse-client on port 9000')
-                ok, out = run_client(9000, payload_chunk)
-                if ok:
-                    continue
+            try:
+                health = subprocess.run(health_cmd, capture_output=True, text=True, timeout=10)
+            except FileNotFoundError:
+                return (False, f'clickhouse-client not found on port {p}', None)
+            except Exception as e:
+                return (False, f'health-check error on port {p}: {e}', None)
 
-            print(f'  trying clickhouse-client on configured port {port_num}')
-            ok, out = run_client(port_num, payload_chunk)
+            if health.returncode != 0:
+                return (False, f'health-check failed: {health.stderr or health.stdout}', health.returncode)
+
+            args = [
+                'clickhouse-client', '--host', host, '--port', str(p), '--query', insert_query
+            ]
+            if username is not None:
+                args += ['--user', username]
+            if password is not None:
+                args += ['--password', password]
+            if database is not None:
+                args += ['--database', database]
+
+            try:
+                r = subprocess.run(
+                    args,
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                out = r.stderr or r.stdout or ''
+                ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
+                return (ok, out, r.returncode)
+            except Exception as e:
+                return (False, str(e), None)
+
+        attempts = []
+        ok = False
+
+        # 1) Prefer native TCP port 9000 when available
+        if port_num != 9000:
+            print("Trying clickhouse-client on port 9000 as primary...")
+            ok, out, rc = run_insert_with_client(9000)
+            attempts.append((f'clickhouse-client:9000', ok, out))
             if ok:
-                continue
+                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
 
-            for p in ([port_num] if port_num in (18123, 8123) else []) + [18123, 8123]:
-                if p is None:
-                    continue
-                print(f'  trying HTTP POST to {host}:{p}')
-                ok, out = http_post(p, payload_chunk)
-                if ok:
-                    break
+        # 2) Try clickhouse-client on configured port
+        if not ok:
+            print(f"Trying clickhouse-client on configured port {port_num}...")
+            ok, out, rc = run_insert_with_client(port_num)
+            attempts.append((f'clickhouse-client:{port_num}', ok, out))
+            if ok:
+                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
 
-            if not ok:
-                print(f"  ✗ Insert failed for bucket {bucket} chunk starting at {i}: {out}")
-                raise Exception(f"ClickHouse insert error: {out}")
+        # 3) Try HTTP POST to candidate HTTP ports (prefer configured, then 18123, then 8123)
+        if not ok:
+            candidate_ports = []
+            if port_num in (18123, 8123):
+                candidate_ports.append(port_num)
+            for p in (18123, 8123):
+                if p not in candidate_ports:
+                    candidate_ports.append(p)
+
+            for p in candidate_ports:
+                # Add database param to ensure correct target DB for HTTP endpoint
+                db_part = f"&database={urllib.parse.quote_plus(database)}" if database else ''
+                url = f"http://{host}:{p}/?query={urllib.parse.quote_plus(insert_query)}{db_part}"
+                curl_cmd = ['curl', '-sS', '-X', 'POST', url, '--data-binary', '@-']
+                if username is not None and password is not None:
+                    curl_cmd += ['--user', f"{username}:{password}"]
+                print(f"Trying HTTP POST to ClickHouse at {host}:{p} (curl)...")
+                try:
+                    r = subprocess.run(
+                        curl_cmd,
+                        input=payload,
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    out = r.stdout or r.stderr or ''
+                    ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
+                    attempts.append((f'curl:{p}', ok, out))
+                    if ok:
+                        result = r
+                        break
+                except Exception as e:
+                    attempts.append((f'curl-exc:{p}', False, str(e)))
+
+        if not ok:
+            # Aggregate attempts for debugging
+            details = '\n'.join([f"{name}: ok={s}, output={o}" for (name, s, o) in attempts])
+            print(f"✗ Insert failed (all attempts):\n{details}")
+            raise Exception(f"ClickHouse insert error: {details}")
 
 
 
+        if result.returncode != 0:
+            print(f"✗ Insert failed: {result.stderr}")
+            raise Exception(f"ClickHouse insert error: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        print(f"✗ Insert timed out")
+        raise
+    except Exception as e:
+        print(f"✗ Insert error: {e}")
+        raise
 
 def migrate_range(start_id, end_id):
     """Migrate a range of image_ids"""
@@ -565,6 +601,5 @@ if __name__ == '__main__':
         raise SystemExit(0)
 
     mysql_conn.close()
-
     # using start_time print how long the SQL query took
     migrate_range(start, end)

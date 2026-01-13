@@ -259,7 +259,7 @@ export interface ImagesAnalytical {
  *
  * 7. upload_date (SEVENTH) - Time-based queries: WHERE has_face = 1 AND upload_date >= X
  *    Query impact: Time-range queries are efficient when combined with prefix filters
- *    Also used for partitioning (PARTITION BY toYYYYMM(upload_date))
+ *    Used for time-range queries (use upload_date in WHERE clauses to limit scanned data)
  *
  * 8. image_id (LAST) - Final uniqueness
  *    Query impact: Point queries by image_id are efficient (in ordering key)
@@ -271,14 +271,8 @@ export interface ImagesAnalytical {
  *
  * SUBOPTIMAL QUERY PATTERNS (skips ordering key columns):
  * - WHERE site_name_id = 1 → skips has_face, scans more data
- * - WHERE body_pose_cluster_512 = 42 → skips first 2 columns, relies on partitioning only
+ * - WHERE body_pose_cluster_512 = 42 → skips first 2 columns, relies on upload_date filtering only
  *
- * PARTITIONING:
- * Partition by: toYYYYMM(upload_date) - monthly partitions
- * - Enables efficient time-range queries via partition pruning
- * - Balances query performance with partition count
- * - Automatic partition skipping for date filters
- * - Example: WHERE upload_date >= '2024-06-01' only scans June+ partitions
  * - Note: upload_date is non-nullable (uses epoch date for unknown), so no coalesce needed
  *
  * ENGINE:
@@ -308,9 +302,8 @@ export const imagesAnalytical = new OlapTable<ImagesAnalytical>(
       "image_id", // LAST: Final uniqueness
     ],
 
-    // Monthly partitions enable efficient time-range queries
+    // Use upload_date filters in WHERE clauses to limit scanned data
     // upload_date is non-nullable (uses epoch date for unknown), so no coalesce needed
-    partitionBy: "toYYYYMM(upload_date)",
   },
 );
 
