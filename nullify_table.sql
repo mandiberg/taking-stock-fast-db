@@ -9,6 +9,13 @@ FROM `images_analytical` i
 ;
 
 
+-- SELECT ALL PARTITIONS
+SELECT DISTINCT partition
+FROM system.parts
+WHERE table = 'images_analytical'
+  AND database = 'local'
+ORDER BY partition;
+
 '''
 I had to alter the table to reflect the changes in the data model
 I ended up renaming the table and creating a new one because the col I was trying to alter was a pkey:

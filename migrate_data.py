@@ -27,10 +27,9 @@ CLICKHOUSE_CONFIG = myPasswords.clickhouse
 #     'database': '<clickhouse_database>'
 # }
 
-BATCH_SIZE = 1000
+BATCH_SIZE = 1000000
+ARRAY_SIZE = 10000
 
-# start a timer
-start_time = time.time()
 
 def extract_batch(mysql_conn, start_id, end_id):
     """Extract and transform a batch of images"""
@@ -166,15 +165,22 @@ def extract_batch(mysql_conn, start_id, end_id):
     return cursor.fetchall()
 
 def fetch_array_map(mysql_conn, table_name, id_column, image_ids):
-    """Return a dict mapping image_id -> list of ids from a many-to-many table"""
+    """Return a dict mapping image_id -> list of ids from a many-to-many table.
+    For large lists of image_ids, fetch in chunks of size ARRAY_SIZE to avoid
+    exceeding memory or query limits.
+    """
     if not image_ids:
         return {}
-    cursor = mysql_conn.cursor()
-    q = f"SELECT image_id, {id_column} FROM {table_name} WHERE image_id IN ({','.join(['%s']*len(image_ids))})"
-    cursor.execute(q, tuple(image_ids))
     res = {}
-    for image_id, val in cursor.fetchall():
-        res.setdefault(image_id, []).append(val)
+    cursor = mysql_conn.cursor()
+    # Fetch in chunks to avoid overly large SQL IN (...) clauses and memory spikes
+    for i in range(0, len(image_ids), ARRAY_SIZE):
+        print(f"  Fetching {table_name} for image_ids {i} to {min(i+ARRAY_SIZE, len(image_ids))}...")
+        chunk = image_ids[i:i+ARRAY_SIZE]
+        q = f"SELECT image_id, {id_column} FROM {table_name} WHERE image_id IN ({','.join(['%s']*len(chunk))})"
+        cursor.execute(q, tuple(chunk))
+        for image_id, val in cursor.fetchall():
+            res.setdefault(image_id, []).append(val)
     return res
 
 
@@ -601,5 +607,5 @@ if __name__ == '__main__':
         raise SystemExit(0)
 
     mysql_conn.close()
-    # using start_time print how long the SQL query took
+
     migrate_range(start, end)

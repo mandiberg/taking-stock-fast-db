@@ -259,7 +259,7 @@ export interface ImagesAnalytical {
  *
  * 7. upload_date (SEVENTH) - Time-based queries: WHERE has_face = 1 AND upload_date >= X
  *    Query impact: Time-range queries are efficient when combined with prefix filters
- *    Used for time-range queries (use upload_date in WHERE clauses to limit scanned data)
+ *    Also used for partitioning (PARTITION BY toYYYYMM(upload_date))
  *
  * 8. image_id (LAST) - Final uniqueness
  *    Query impact: Point queries by image_id are efficient (in ordering key)
@@ -271,9 +271,7 @@ export interface ImagesAnalytical {
  *
  * SUBOPTIMAL QUERY PATTERNS (skips ordering key columns):
  * - WHERE site_name_id = 1 → skips has_face, scans more data
- * - WHERE body_pose_cluster_512 = 42 → skips first 2 columns, relies on upload_date filtering only
- *
- * - Note: upload_date is non-nullable (uses epoch date for unknown), so no coalesce needed
+ * - WHERE body_pose_cluster_512 = 42 → skips first 2 columns, relies on partitioning only
  *
  * ENGINE:
  * ReplacingMergeTree(updated_at) - handles duplicates from MySQL
@@ -302,8 +300,12 @@ export const imagesAnalytical = new OlapTable<ImagesAnalytical>(
       "image_id", // LAST: Final uniqueness
     ],
 
-    // Use upload_date filters in WHERE clauses to limit scanned data
+    // Monthly partitions enable efficient time-range queries
     // upload_date is non-nullable (uses epoch date for unknown), so no coalesce needed
+    // No table partitioning is configured; use upload_date filters in WHERE clauses
+    settings: {
+      allow_nullable_key: "1"  // Enable nullable columns in ORDER BY (string value required by type)
+    }
   },
 );
 
