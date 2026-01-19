@@ -84,10 +84,14 @@ export interface ImagesAnalytical {
   ethnicity_white: boolean;
   /** Boolean: 1 if image has black ethnicity, 0 otherwise */
   ethnicity_black: boolean;
-  /** Boolean: 1 if image has Asian ethnicity, 0 otherwise */
-  ethnicity_asian: boolean;
+  /** Boolean: 1 if image has East Asian ethnicity, 0 otherwise */
+  ethnicity_east_asian: boolean;
+  /** Boolean: 1 if image has South Asian ethnicity, 0 otherwise */
+  ethnicity_south_asian: boolean;
+  /** Boolean: 1 if image has Southeast Asian ethnicity, 0 otherwise */
+  ethnicity_southeast_asian: boolean;
   /** Boolean: 1 if image has Hispanic ethnicity, 0 otherwise */
-  ethnicity_hispanic: boolean;
+  ethnicity_hispanic_latino: boolean;
   /** Boolean: 1 if image has Middle Eastern ethnicity, 0 otherwise */
   ethnicity_middle_eastern: boolean;
   /** Boolean: 1 if image has Native American ethnicity, 0 otherwise */
@@ -96,8 +100,13 @@ export interface ImagesAnalytical {
   ethnicity_pacific_islander: boolean;
   /** Boolean: 1 if image has mixed ethnicity, 0 otherwise */
   ethnicity_mixed: boolean;
+  /** Boolean: 1 if image has Afro-Latinx ethnicity, 0 otherwise */
+  ethnicity_afro_latinx: boolean;
+  /** Boolean: 1 if image has person of color ethnicity, 0 otherwise */
+  ethnicity_person_of_color: boolean;
   /** Boolean: 1 if image has other ethnicity, 0 otherwise */
   ethnicity_other: boolean;
+
 
   // Presence Flags (critical filters)
   // High selectivity boolean filters - most common query filters

@@ -4,19 +4,22 @@ import { experimental_createMCPClient } from "@ai-sdk/mcp";
 import { getAISystemPrompt } from "./system-prompt";
 import { getAnthropicApiKey, getMcpServerUrl } from "@/env-vars";
 
+let cachedTools: any | null = null;
+
 export async function getAnthropicAgentStreamTextOptions(
   messages: UIMessage[],
 ): Promise<any> {
   const apiKey = getAnthropicApiKey();
 
   const anthropic = createAnthropic({
-    apiKey: apiKey,
+    apiKey,
   });
 
-  // Convert UIMessages to ModelMessages for AI SDK v5
-  const modelMessages = convertToModelMessages(messages);
+  // 🔒 Trim message history
+  const trimmedMessages = messages.slice(-10);
+  const modelMessages = convertToModelMessages(trimmedMessages);
 
-  // Create MCP client and get tools
+  // MCP setup
   const mcpServerUrl = getMcpServerUrl();
   const mcpApiKey = process.env.MCP_API_TOKEN;
 
@@ -31,17 +34,24 @@ export async function getAnthropicAgentStreamTextOptions(
     },
   });
 
-  const tools = await mcpClient.tools();
-
-  console.log("[Agent Config] Available tools:", Object.keys(tools));
+  if (!cachedTools) {
+    cachedTools = await mcpClient.tools();
+    console.log("[Agent Config] Available tools:", Object.keys(cachedTools));
+  }
 
   return {
     model: anthropic("claude-haiku-4-5"),
+
+    // 🔒 HARD LIMITS (THIS FIXES YOUR CRASH)
+    maxTokens: 2048,
+
     system: getAISystemPrompt(),
     messages: modelMessages,
-    tools: tools,
+    tools: cachedTools,
     toolChoice: "auto",
-    // Enable multi-step reasoning
-    stopWhen: stepCountIs(25),
+
+    // Reduce reasoning amplification
+    stopWhen: stepCountIs(8),
   };
+
 }

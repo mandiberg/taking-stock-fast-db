@@ -29,7 +29,7 @@ CLICKHOUSE_CONFIG = myPasswords.clickhouse
 
 BATCH_SIZE = 1000000
 ARRAY_SIZE = 10000
-
+INSERT_CHUNK_SIZE = 10000
 
 def extract_batch(mysql_conn, start_id, end_id):
     """Extract and transform a batch of images"""
@@ -359,7 +359,10 @@ def transform_row(row, keywords_dict, ethnicity_dict):
     return transformed
 
 def insert_batch(rows):
-    """Insert batch into ClickHouse using JSONEachRow for safe NULL/array handling"""
+    """Insert batch into ClickHouse using JSONEachRow for safe NULL/array handling.
+    To avoid very large payloads that can exhaust client memory (curl) or time out
+    clickhouse-client, break inserts into smaller chunks of INSERT_CHUNK_SIZE.
+    """
     if not rows:
         return
 
@@ -382,13 +385,9 @@ def insert_batch(rows):
 
     insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) FORMAT JSONEachRow"
 
-    # Prepare JSONEachRow payload
-    payload = '\n'.join([json.dumps(row, default=str) for row in rows])
-
     try:
         # Normalize host and credentials
         host = CLICKHOUSE_CONFIG['host']
-        # Prefer IPv4 loopback to avoid unintended IPv6 ::1 connection issues on some setups
         if host == 'localhost':
             host = '127.0.0.1'
         username = CLICKHOUSE_CONFIG.get('username')
@@ -402,7 +401,7 @@ def insert_batch(rows):
 
         import urllib.parse
 
-        def run_insert_with_client(p):
+        def run_insert_with_client(p, payload):
             # quick health-check (include auth/database to ensure accurate auth test)
             health_cmd = ['clickhouse-client', '--host', host, '--port', str(p), '--query', 'SELECT 1']
             if username is not None:
@@ -446,70 +445,79 @@ def insert_batch(rows):
             except Exception as e:
                 return (False, str(e), None)
 
-        attempts = []
-        ok = False
+        # Insert in smaller chunks
+        total = len(rows)
+        if total == 0:
+            return
+        chunks = list(range(0, total, INSERT_CHUNK_SIZE))
+        for idx, start in enumerate(chunks):
+            chunk_rows = rows[start:start + INSERT_CHUNK_SIZE]
+            # Build payload only for this chunk
+            payload = '\n'.join([json.dumps(row, default=str) for row in chunk_rows])
+            print(f"  Inserting chunk {idx+1}/{len(chunks)} ({len(chunk_rows)} rows)")
 
-        # 1) Prefer native TCP port 9000 when available
-        if port_num != 9000:
-            print("Trying clickhouse-client on port 9000 as primary...")
-            ok, out, rc = run_insert_with_client(9000)
-            attempts.append((f'clickhouse-client:9000', ok, out))
-            if ok:
-                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
+            attempts = []
+            ok = False
 
-        # 2) Try clickhouse-client on configured port
-        if not ok:
-            print(f"Trying clickhouse-client on configured port {port_num}...")
-            ok, out, rc = run_insert_with_client(port_num)
-            attempts.append((f'clickhouse-client:{port_num}', ok, out))
-            if ok:
-                result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
+            # 1) Prefer native TCP port 9000 when available
+            if port_num != 9000:
+                print("  Trying clickhouse-client on port 9000 as primary for this chunk...")
+                ok, out, rc = run_insert_with_client(9000, payload)
+                attempts.append((f'clickhouse-client:9000', ok, out))
+                if ok:
+                    result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
 
-        # 3) Try HTTP POST to candidate HTTP ports (prefer configured, then 18123, then 8123)
-        if not ok:
-            candidate_ports = []
-            if port_num in (18123, 8123):
-                candidate_ports.append(port_num)
-            for p in (18123, 8123):
-                if p not in candidate_ports:
-                    candidate_ports.append(p)
+            # 2) Try clickhouse-client on configured port
+            if not ok:
+                print(f"  Trying clickhouse-client on configured port {port_num} for this chunk...")
+                ok, out, rc = run_insert_with_client(port_num, payload)
+                attempts.append((f'clickhouse-client:{port_num}', ok, out))
+                if ok:
+                    result = types.SimpleNamespace(returncode=0, stdout=out, stderr='')
 
-            for p in candidate_ports:
-                # Add database param to ensure correct target DB for HTTP endpoint
-                db_part = f"&database={urllib.parse.quote_plus(database)}" if database else ''
-                url = f"http://{host}:{p}/?query={urllib.parse.quote_plus(insert_query)}{db_part}"
-                curl_cmd = ['curl', '-sS', '-X', 'POST', url, '--data-binary', '@-']
-                if username is not None and password is not None:
-                    curl_cmd += ['--user', f"{username}:{password}"]
-                print(f"Trying HTTP POST to ClickHouse at {host}:{p} (curl)...")
-                try:
-                    r = subprocess.run(
-                        curl_cmd,
-                        input=payload,
-                        capture_output=True,
-                        text=True,
-                        timeout=60
-                    )
-                    out = r.stdout or r.stderr or ''
-                    ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
-                    attempts.append((f'curl:{p}', ok, out))
-                    if ok:
-                        result = r
-                        break
-                except Exception as e:
-                    attempts.append((f'curl-exc:{p}', False, str(e)))
+            # 3) Try HTTP POST to candidate HTTP ports (prefer configured, then 18123, then 8123)
+            if not ok:
+                candidate_ports = []
+                if port_num in (18123, 8123):
+                    candidate_ports.append(port_num)
+                for p in (18123, 8123):
+                    if p not in candidate_ports:
+                        candidate_ports.append(p)
 
-        if not ok:
-            # Aggregate attempts for debugging
-            details = '\n'.join([f"{name}: ok={s}, output={o}" for (name, s, o) in attempts])
-            print(f"✗ Insert failed (all attempts):\n{details}")
-            raise Exception(f"ClickHouse insert error: {details}")
+                for p in candidate_ports:
+                    db_part = f"&database={urllib.parse.quote_plus(database)}" if database else ''
+                    url = f"http://{host}:{p}/?query={urllib.parse.quote_plus(insert_query)}{db_part}"
+                    curl_cmd = ['curl', '-sS', '-X', 'POST', url, '--data-binary', '@-']
+                    if username is not None and password is not None:
+                        curl_cmd += ['--user', f"{username}:{password}"]
+                    print(f"  Trying HTTP POST to ClickHouse at {host}:{p} (curl) for this chunk...")
+                    try:
+                        r = subprocess.run(
+                            curl_cmd,
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            timeout=60
+                        )
+                        out = r.stdout or r.stderr or ''
+                        ok = (r.returncode == 0 and not str(out).strip().startswith('Code:'))
+                        attempts.append((f'curl:{p}', ok, out))
+                        if ok:
+                            result = r
+                            break
+                    except Exception as e:
+                        attempts.append((f'curl-exc:{p}', False, str(e)))
 
+            if not ok:
+                # Aggregate attempts for debugging
+                details = '\n'.join([f"{name}: ok={s}, output={o}" for (name, s, o) in attempts])
+                print(f"✗ Insert failed for chunk {idx+1}/{len(chunks)} (all attempts):\n{details}")
+                raise Exception(f"ClickHouse insert error (chunk {idx+1}): {details}")
 
+            if result.returncode != 0:
+                print(f"✗ Insert failed for chunk {idx+1}: {result.stderr}")
+                raise Exception(f"ClickHouse insert error: {result.stderr}")
 
-        if result.returncode != 0:
-            print(f"✗ Insert failed: {result.stderr}")
-            raise Exception(f"ClickHouse insert error: {result.stderr}")
     except subprocess.TimeoutExpired:
         print(f"✗ Insert timed out")
         raise
